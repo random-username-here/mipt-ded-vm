@@ -1,8 +1,4 @@
-<center>
-    <img src="./assets/logo.svg">
-</center>
-
-A toy stack-based virtual machine with its own assembler.
+<img src="./assets/logo.svg" style="margin-bottom: 50px;">
 
 Quick links:
 
