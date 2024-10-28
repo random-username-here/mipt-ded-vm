@@ -94,25 +94,6 @@ dup2:
   // [x] [y] [x] [y] [ret]
   ret
 
-// Square at (x*256, y*256) of size 256, maybe filled
-// Args:
-//  - ret. addr
-//  - 0 or not 0 to determine if it should be filled
-//  - y
-//  - x
-crt_square:
-  push 2
-  fswap
-  // [ret] [y] [fill] [x]
-  swap
-  // [ret] [y] [x] [fill]
-  push 1
-  fswap
-  // [ret] [fill] [x] [y]
-
-  push dup2
-  call
-
 
 //=====[ Timer interrupt ]==================================
 
@@ -120,6 +101,7 @@ crt_square:
 .const XPOS 0x01000
 
 handle_timer1:
+
   push XPOS
   get8
   dup
@@ -136,12 +118,12 @@ handle_timer1:
   push 10
   lsh
   xor
+
   dup
   push 1
   rsh
   add
-  push 0xff
-  and
+
 
   // Also convert to screen space from 0-256 coordinates
   push 240
@@ -150,7 +132,8 @@ handle_timer1:
   add
 
   push 1
-  call crt_move
+  push crt_move
+  call
 
   // Increment X in memory
   push 1

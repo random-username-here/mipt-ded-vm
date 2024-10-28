@@ -44,8 +44,8 @@ void* interruptor(void* _vm) {
   vm->log_fn(VM_LOG_INFO, "Interruptor thread started");
 
   while (!vm->should_die) {
-    usleep(100000);
-    vm->log_fn(VM_LOG_INFO, "Triggering timer interrupt...");
+    usleep(1000000 / 60);
+    //vm->log_fn(VM_LOG_INFO, "Triggering timer interrupt...");
     vm_state_trigger_interrupt(_vm, VM_INTR_TIMER1);
   }
 

@@ -76,7 +76,7 @@ void vm_state_trigger_interrupt(vm_state* state, vm_interrupt intr) {
   check$(state, "Should get a valid state");
   check$(intr < NUM_INTERRUPTS, "Interrupts are in range [0; %d), got number %d", NUM_INTERRUPTS, intr);
 
-  state->log_fn(VM_LOG_INFO, "Triggering an interrupt");
+  //state->log_fn(VM_LOG_INFO, "Triggering an interrupt");
 
   // TODO: better understand this hell
   // https://stackoverflow.com/questions/11666610/how-to-give-priority-to-privileged-thread-in-mutex-locking
@@ -84,7 +84,7 @@ void vm_state_trigger_interrupt(vm_state* state, vm_interrupt intr) {
   pthread_mutex_lock(&state->mutex);
   --state->num_waiting_to_ask_interrupts;
   
-  state->log_fn(VM_LOG_INFO, ".. locked the state");
+  //state->log_fn(VM_LOG_INFO, ".. locked the state");
 
   if (!state->interrupts_disabled) {
 
@@ -94,7 +94,7 @@ void vm_state_trigger_interrupt(vm_state* state, vm_interrupt intr) {
     if (state->is_halted) {
       // Machine is halted, it currently does nothing
       // Wake it up.
-      state->log_fn(VM_LOG_INFO, ".. waking up the machine");
+      //state->log_fn(VM_LOG_INFO, ".. waking up the machine");
       pthread_mutex_lock(&state->wake_up_mutex);
       pthread_cond_signal(&state->wake_up);
       pthread_mutex_unlock(&state->wake_up_mutex);
@@ -140,21 +140,21 @@ void vm_state_halt(vm_state* state) {
   pthread_mutex_unlock(&state->mutex);
   pthread_mutex_unlock(&state->mutex); // FIXME! we unlock mutex locked second time by mainloop
 
-  state->log_fn(VM_LOG_INFO, "Halted, waiting wake up call");
+  //state->log_fn(VM_LOG_INFO, "Halted, waiting wake up call");
   pthread_mutex_lock(&state->wake_up_mutex);
-  state->log_fn(VM_LOG_INFO, ".. locked wake up mutex");
+  //state->log_fn(VM_LOG_INFO, ".. locked wake up mutex");
 
   bool should_wake_up = false;
   while (!should_wake_up) {
 
     // Wait until someone calls for wakeup
-    state->log_fn(VM_LOG_INFO, ".. waiting for condition");
+    //state->log_fn(VM_LOG_INFO, ".. waiting for condition");
     pthread_cond_wait(&state->wake_up, &state->wake_up_mutex);
-    state->log_fn(VM_LOG_INFO, ".. somebody triggered a wake up call");
+    //state->log_fn(VM_LOG_INFO, ".. somebody triggered a wake up call");
 
     // Check if they have something worth waking up for
     pthread_mutex_lock(&state->mutex);
-    state->log_fn(VM_LOG_INFO, ".. %zu interrupts asked", ia_length(state->asked_interrupts));
+    //state->log_fn(VM_LOG_INFO, ".. %zu interrupts asked", ia_length(state->asked_interrupts));
 
     for (size_t i = 0; i < ia_length(state->asked_interrupts); ++i) {
       if (!ia_length(state->interrupt_type) || 

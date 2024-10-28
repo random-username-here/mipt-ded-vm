@@ -10,15 +10,6 @@ $00000 | $01000 | RW     | System IO
 $01000 | $10000 | RWX    | 60K of free memory
 $10000 | $20000 | RX     | ROM. All extra space is filled with zeroes.
 
-# Video memory
-
-This machine has a 128x64 text display.
-There are **no** routines for writting something into terminal. This is a emulator.
-
-Each cell is represented by 2 bytes.
-First byte is ASCII character (special characters are shown as `?`), second byte has
-low 4 bytes determining foreground, high 4 bytes background.
-
 # System IO map
 
 ## `$00000 - $00008` - Segfault place
