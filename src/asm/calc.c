@@ -459,10 +459,11 @@ static ivm_sym_value_t _compute_fn(ivm_symtab_entry* entry, ivm_symtab symtab,
                       || prev_ttype == TOK_RPAREN;
         
         size_t op_prec = binary_operator_priority(tok, report_error);
+
         while (is_binary
               && ia_length(op_stack)
               && ia_top$(op_stack).op_type != SHYU_LBRACE
-              && binary_operator_priority(ia_top$(op_stack).operator, report_error) >= op_prec) {
+              && binary_operator_priority(ia_top$(op_stack).operator, report_error) <= op_prec) {
           execute_operator(ia_top$(op_stack), &res_stack, report_error);
           ia_pop$(&op_stack);
         }
@@ -481,8 +482,10 @@ static ivm_sym_value_t _compute_fn(ivm_symtab_entry* entry, ivm_symtab symtab,
         break;
 
       case TOK_RPAREN:
-        while (ia_length(op_stack) && ia_top$(op_stack).op_type != SHYU_LBRACE)
+        while (ia_length(op_stack) && ia_top$(op_stack).op_type != SHYU_LBRACE) {
           execute_operator(ia_top$(op_stack), &res_stack, report_error);
+          ia_pop$(&op_stack);
+        }
         if (!ia_length(op_stack)) {
           ivm_report(REPORT_ERROR, tok, "Mismatched `)`");
           longjmp(report_error, 0);
