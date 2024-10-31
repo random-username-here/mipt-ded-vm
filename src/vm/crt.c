@@ -150,14 +150,17 @@ static size_t _new_segment(vm_crt* crt) {
 
 static void _vm_crt_move(vm_crt* crt, float x, float y, bool stroke) {
 
+  //printf("%smove %f %f\x1b[0m\n", (stroke ? "" : "\x1b[90m"), x, y);
+
   pthread_mutex_lock(&crt->mutex);
 
   size_t seg = _new_segment(crt);
-  crt->segs[seg].start = (_vm_crt_point) { .x=x, .y=y };
+  crt->segs[seg].start = crt->cursor;
+  crt->cursor = (_vm_crt_point) { .x=x, .y = y };
   crt->segs[seg].next_idx = -1;
 
+  double now = glfwGetTime();
   if (stroke) {
-    double now = glfwGetTime();
 
     crt->segs[seg].line_end_time = now;
     
@@ -178,7 +181,8 @@ static void _vm_crt_move(vm_crt* crt, float x, float y, bool stroke) {
                                    : physical_start_time;
 
   } else {
-    crt->segs[seg].line_start_time = crt->segs[seg].line_end_time = -1;
+    crt->segs[seg].line_start_time = -1;
+    crt->segs[seg].line_end_time = now; // So next line won't get confused
   }
 
   if (crt->newest_idx != -1) {
@@ -192,7 +196,6 @@ static void _vm_crt_move(vm_crt* crt, float x, float y, bool stroke) {
 
   crt->newest_idx = seg;
 
-  crt->cursor = (_vm_crt_point) { .x=x, .y = y };
 
   pthread_mutex_unlock(&crt->mutex);
 }
@@ -438,23 +441,24 @@ static void* _render_thread(void* _crt) {
       float start_time = 1.0 - (now - crt->segs[seg].line_start_time) / FULL_FADE_TIME;
       float end_time = 1.0 - (now - crt->segs[seg].line_end_time) / FULL_FADE_TIME;
 
-      if (crt->segs[seg].line_end_time > 0) {
+      if (crt->segs[seg].line_start_time > 0) {
         // If it is > 0, draw a line
-        _draw_circle(crt, crt->segs[seg].start, LINE_WIDTH/2, start_time);
+        //_draw_circle(crt, crt->segs[seg].start, LINE_WIDTH/2, start_time);
         _draw_line(crt, crt->segs[seg].start, end, LINE_WIDTH, start_time, end_time);
         prev_stroke = true;
         prev_end = end_time;
       } else {
         // Else there is no line
-        if (prev_stroke) // Draw endcap on previous line
-          _draw_circle(crt, crt->segs[seg].start, LINE_WIDTH/2, prev_end);
+        if (prev_stroke) { // Draw endcap on previous line
+          //_draw_circle(crt, crt->segs[seg].start, LINE_WIDTH/2, prev_end);
+        }
         prev_stroke = false;
       }
 
       seg = crt->segs[seg].next_idx;
     }
     
-    _draw_circle(crt, crt->cursor, LINE_WIDTH/2, 1.0);
+    //_draw_circle(crt, crt->cursor, LINE_WIDTH/2, 1.0);
 
     glfwSwapBuffers(crt->window);
 
