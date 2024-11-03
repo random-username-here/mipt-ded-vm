@@ -130,10 +130,12 @@ void _ia_generic_pop(void **array, size_t item_size) {
   *zero_byte(*array, item_size) = '\0';
 }
 
-void _ia_clear(void** array) {
+void _ia_resize(void** array, size_t size) {
 
-  assert(array);
+  check$(array, "Array to be resized must be present");
+
   _ia_actual_array_t* arr = actual_array(*array);
-  arr->length = 0;
+  check$(size <= arr->length, "Arrays can only be resized to be smaller");
 
+  arr->length = size;
 }

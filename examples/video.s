@@ -115,17 +115,16 @@ handle_timer1:
 
   // Perform some hash on x
   dup
-  push 10
-  lsh
-  xor
-
-  dup
-  push 1
+  mul
+  push 6
   rsh
-  add
-
+  push 0xff
+  and
 
   // Also convert to screen space from 0-256 coordinates
+  push 255
+  swap
+  sub
   push 240
   mul
   push 256 * 8

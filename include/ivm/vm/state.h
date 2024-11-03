@@ -26,18 +26,31 @@
 typedef enum {
 
   VM_INTR_TIMER1 = 0x01,
+
+  // Key callback
+  VM_INTR_KEY = 0x08,
+
   /// Interrupt which happens when something bad happened
   /// (like stack underflow)
   VM_INTR_EXCEPTION = 0x0f,
 
   VM_INTR_NONE = NUM_INTERRUPTS
 
-} vm_interrupt;
+} vm_interrupt_type;
 
+struct vm_state;
+
+typedef struct {
+  vm_interrupt_type type;
+  void* data;
+  void (*setup_state)(struct vm_state* machine, void* data);
+} vm_interrupt;
 
 static const size_t vm_interrupt_priority[NUM_INTERRUPTS] = {
 
   [VM_INTR_TIMER1] = 1,
+
+  [VM_INTR_KEY] = 2,
 
   /// \brief An exception happened (like division by zero)
   /// **Nothing can interrupt this!** This thing MUST
@@ -108,7 +121,7 @@ typedef long long vm_stack_val_t;
 
 struct vm_crt;
 
-typedef struct {
+typedef struct vm_state {
 
   //---- Normal program stuff
 
@@ -165,19 +178,24 @@ typedef struct {
 
   // Type of the current interrupt
   // (top item is currently handled)
-  ia_arr$(vm_interrupt) interrupt_type;
+  ia_arr$(vm_interrupt_type) interrupt_type;
 
   // Return addresses of the interrupts
   ia_arr$(vm_stack_val_t) interrupt_return_addr;
 
   // Each time we ask an interrupt, it is placed here
-  ia_arr$(vm_stack_val_t) asked_interrupts;
+  ia_arr$(vm_interrupt) asked_interrupts;
 
   //---- Exception handling
 
   vm_stack_val_t exception_pc;
   vm_stack_val_t exception_segfault_addr;
   vm_exception_type exception_type;
+
+  //---- Keyboard
+  uint16_t kb_scancode;
+  uint8_t kb_action;
+  uint8_t kb_mods;
 
   //---- Showing messages
 
@@ -209,6 +227,12 @@ void vm_state_trigger_interrupt(vm_state* state, vm_interrupt intr);
 ///
 /// This function sets all things in state and waits untill
 /// an interrupt is trigerred. Then it returns.
+/// 
+/// \hack HACK!!!: This unlocks/locks state mutex twice,
+///                because the first time it is locked by the main loop.
+///                A better way is needed, but I couldn't find a way
+///                to read lock count of the recursive mutex.
+///                A base library with all the threading stuff is required.
 ///
 void vm_state_halt(vm_state* state);
 

@@ -260,7 +260,11 @@ bool vm_op_int(vm_state* state) {
   vm_stack_val_t intr = get$();
   if (intr < 0 || intr >= NUM_INTERRUPTS)
     cmd_fail$(VM_EXC_BAD_INT_NUMBER);
-  vm_state_trigger_interrupt(state, intr);
+  vm_state_trigger_interrupt(state, (vm_interrupt) {
+      .type = intr,
+      .data = NULL,
+      .setup_state = NULL
+  });
   return false;
 }
 
@@ -280,7 +284,7 @@ bool vm_op_fini(vm_state* state) {
     cmd_fail$(VM_EXC_FINI_NOT_IN_INTERRUPT);
 
   vm_stack_val_t ret_addr = ia_top$(state->interrupt_return_addr);
-  vm_interrupt what = ia_top$(state->interrupt_type);
+  vm_interrupt_type what = ia_top$(state->interrupt_type);
 
   ia_pop$(&state->interrupt_type);
   ia_pop$(&state->interrupt_return_addr);

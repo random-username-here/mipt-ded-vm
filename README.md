@@ -28,7 +28,28 @@ it would be possible to write an OS for this thing.
 
 ## TODO-s
 
+From the point of the machine development:
+
+ - A `.include` directive!
+ - Linking
  - A debugger, because triggering errors is not the best way
  - Context switching?
  - Fake disk I/O
  - A compiler, because writting assembly is hard.
+
+From the point of required tools/libraries/features
+requiring a total rewrite to make this better:
+
+ - Finish the documentation system
+ - Make a threading library, because `pthread` lacks:
+    - Good recursive mutexes  
+      They may not exist on some machines, there is no way to exit
+      all/return back (see `vm/state.c`, `vm_state_halt()`). 
+    - Easy to use priority mutexes
+    - `pthread`'s conditions are messy.
+ - Allways return error codes, or something better. Never fail when the memory had ran out.
+   (especially in `array`). This gives the possibility of `try`, `catch` and `catch unreachable` macro,
+   like in Zig.
+ - Add `..._assert_valid()` to everything.
+ - Maybe add a stack trace in the error handling library.
+

@@ -32,9 +32,9 @@ vm_state* vm_state_new (void) {
   //---- Interrupts
 
   state->interrupts_disabled = false;
-  state->interrupt_type = ia_new_empty_array$(vm_interrupt);
+  state->interrupt_type = ia_new_empty_array$(vm_interrupt_type);
   state->interrupt_return_addr = ia_new_empty_array$(vm_stack_val_t);
-  state->asked_interrupts = ia_new_empty_array$(vm_stack_val_t);
+  state->asked_interrupts = ia_new_empty_array$(vm_interrupt);
 
   pthread_mutexattr_t attr;
   pthread_mutexattr_init(&attr) CHECKED("Must init mutex attr");
@@ -53,6 +53,11 @@ vm_state* vm_state_new (void) {
 
   state->exception_pc = 0;
   state->exception_type = VM_EXC_NONE;
+
+  //---- CRT
+  // TODO: move this into constants CRT_SIZE
+  state->crt_x = 0xffff / 2;
+  state->crt_y = 0xffff / 2;
 
   return state;
 }
@@ -74,7 +79,7 @@ void vm_state_destroy(vm_state *state) {
 void vm_state_trigger_interrupt(vm_state* state, vm_interrupt intr) {
 
   check$(state, "Should get a valid state");
-  check$(intr < NUM_INTERRUPTS, "Interrupts are in range [0; %d), got number %d", NUM_INTERRUPTS, intr);
+  check$(intr.type < NUM_INTERRUPTS, "Interrupts are in range [0; %d), got number %d", NUM_INTERRUPTS, intr);
 
   //state->log_fn(VM_LOG_INFO, "Triggering an interrupt");
 
@@ -86,7 +91,8 @@ void vm_state_trigger_interrupt(vm_state* state, vm_interrupt intr) {
   
   //state->log_fn(VM_LOG_INFO, ".. locked the state");
 
-  if (!state->interrupts_disabled) {
+  if (!state->interrupts_disabled || intr.type == VM_INTR_EXCEPTION) {
+    // Exception is non-maskable
 
     // Ask for interrupt
     ia_push$(&state->asked_interrupts, intr);
@@ -99,11 +105,10 @@ void vm_state_trigger_interrupt(vm_state* state, vm_interrupt intr) {
       pthread_cond_signal(&state->wake_up);
       pthread_mutex_unlock(&state->wake_up_mutex);
     }
+    pthread_mutex_lock(&state->interrupts_are_written_mutex);
+    pthread_cond_signal(&state->interrupts_are_written);
+    pthread_mutex_unlock(&state->interrupts_are_written_mutex);
   }
-
-  pthread_mutex_lock(&state->interrupts_are_written_mutex);
-  pthread_cond_signal(&state->interrupts_are_written);
-  pthread_mutex_unlock(&state->interrupts_are_written_mutex);
 
   pthread_mutex_unlock(&state->mutex);
 }
@@ -159,7 +164,7 @@ void vm_state_halt(vm_state* state) {
     for (size_t i = 0; i < ia_length(state->asked_interrupts); ++i) {
       if (!ia_length(state->interrupt_type) || 
           vm_interrupt_priority[ia_top$(state->interrupt_type)]
-          < vm_interrupt_priority[state->asked_interrupts[i]]) {
+          < vm_interrupt_priority[state->asked_interrupts[i].type]) {
         // This is more important then what we are doing now
         should_wake_up = true;
         state->is_halted = false;
@@ -206,10 +211,18 @@ void vm_state_raise_exception(vm_state* state, vm_exception_type type) {
     state->should_die = true;
   }
 
+  // Exceptions are top priority,
+  // so they cannot be postponed.
+  // Also there cannot be two error interrupts requested
+  // at the same time.
   state->exception_type = type;
   state->exception_pc = state->pc;
 
-  vm_state_trigger_interrupt(state, VM_INTR_EXCEPTION);
+  vm_state_trigger_interrupt(state, (vm_interrupt) {
+      .type = VM_INTR_EXCEPTION,
+      .setup_state = NULL,
+      .data = NULL
+  });
 
   pthread_mutex_unlock(&state->mutex);
 }

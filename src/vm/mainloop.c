@@ -1,4 +1,5 @@
 #include "ivm/vm/mainloop.h"
+#include "ivm/common/array.h"
 #include "ivm/vm/mem.h"
 #include "ivm/vm/ops.h"
 #include "ivm/vm/state.h"
@@ -70,7 +71,7 @@ void vm_mainloop(vm_state* state) {
   while (!state->should_die && !state->crt->was_closed) {
 
     while (state->num_waiting_to_ask_interrupts) {
-      state->log_fn(VM_LOG_INFO, "Waiting for interrupts to be written");
+      //state->log_fn(VM_LOG_INFO, "Waiting for interrupts to be written");
       pthread_mutex_lock(&state->interrupts_are_written_mutex);
       pthread_cond_wait(&state->interrupts_are_written, &state->interrupts_are_written_mutex);
       pthread_mutex_unlock(&state->interrupts_are_written_mutex);
@@ -100,15 +101,17 @@ void vm_mainloop(vm_state* state) {
 
     state->pc += advance;
 
+    size_t num_postponed = 0;
+
     for (size_t i = 0; i < ia_length(state->asked_interrupts); ++i) {
       if (!ia_length(state->interrupt_type) || 
           vm_interrupt_priority[ia_top$(state->interrupt_type)]
-          < vm_interrupt_priority[state->asked_interrupts[i]]) {
+          < vm_interrupt_priority[state->asked_interrupts[i].type]) {
 
         // Interrupt happened, which interrupts us
         
-        vm_stack_val_t handler = state->interrupt_vector[state->asked_interrupts[i]];
-        if (!handler && state->asked_interrupts[i] == VM_INTR_EXCEPTION) {
+        vm_stack_val_t handler = state->interrupt_vector[state->asked_interrupts[i].type];
+        if (!handler && state->asked_interrupts[i].type == VM_INTR_EXCEPTION) {
           // No interrupt set for error handling interrupt
           if (state->log_fn) {
             vm_log_error(state); 
@@ -121,12 +124,24 @@ void vm_mainloop(vm_state* state) {
           // Ignore this interrupt
           continue;
         }
-        ia_push$(&state->interrupt_type, state->asked_interrupts[i]);
+        ia_push$(&state->interrupt_type, state->asked_interrupts[i].type);
         ia_push$(&state->interrupt_return_addr, state->pc);
+
+        if (state->asked_interrupts[i].setup_state) {
+          state->asked_interrupts[i].setup_state(
+              state,
+              state->asked_interrupts[i].data
+          );
+        }
+
         state->pc = handler;
+      } else {
+        if (num_postponed != i)
+          state->asked_interrupts[num_postponed] = state->asked_interrupts[i];
+        ++num_postponed;
       }
     }
-    ia_clear$(&state->asked_interrupts);
+    ia_resize$(&state->asked_interrupts, num_postponed);
 
     pthread_mutex_unlock(&state->mutex);
   }

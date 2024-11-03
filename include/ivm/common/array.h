@@ -158,9 +158,12 @@ void _ia_generic_pop(void** array, size_t item_size);
 #define ia_top$(array) _ia_top$(array, concat$(_ia_top_temp__, __COUNTER__))
 
 
-/// \brief Remove all elements from the array
-void _ia_clear(void** array);
+void _ia_resize(void** array, size_t size);
 
-#define ia_clear$(array) _ia_clear((void**) (array))
+// Shrink the array to size `sz`
+#define ia_resize$(array, sz) _ia_resize((void**) (array), (sz))
+
+#define ia_clear$(array) ia_resize$(array, 0)
+
 
 #endif

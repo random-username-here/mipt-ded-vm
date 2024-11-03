@@ -25,7 +25,8 @@ void log_fn(vm_log_type type, const char* fmt, ...) {
   va_list args;
   va_start(args, fmt);
   if (!printed_nl) {
-    fputs(ESC_RED "\\\n" ESC_RST, stdout);
+    fputs(ESC_RED "\n\\ " ESC_RST, stdout);
+    printed_nl = true;
   }
   fputs(prefixes[type], stdout);
   vprintf(fmt, args);
@@ -46,7 +47,11 @@ void* interruptor(void* _vm) {
   while (!vm->should_die) {
     usleep(1000000 / 60);
     //vm->log_fn(VM_LOG_INFO, "Triggering timer interrupt...");
-    vm_state_trigger_interrupt(_vm, VM_INTR_TIMER1);
+    vm_state_trigger_interrupt(_vm, (vm_interrupt) {
+        .type=VM_INTR_TIMER1,
+        .setup_state=NULL,
+        .data=NULL
+    });
   }
 
   return NULL;

@@ -2,6 +2,8 @@
 #include <GL/glext.h>
 #include <GLFW/glfw3.h>
 #include <math.h>
+#include <pthread.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -76,21 +78,7 @@ unsigned make_program_or_die(const char* vsh, const char* fsh) {
 }
 
 
-//====[ Setup and callbacks ]===================================================
-
-static void gl_debug(GLenum source, GLenum type, unsigned id, GLenum severity,
-              GLsizei length, const GLchar *message, const void *vm) {
-
-  vm_crt* crt = *((vm_crt**) vm);
-  
-  if (crt->vm->log_fn)
-    crt->vm->log_fn(VM_LOG_INFO, "OpenGL debug message: %s", message);
-}
-
-static void gl_error(int error, const char* descr) {
-  // No custom parameter alowed here, sadly
-  fprintf(stdout, ESC_RED "GLFW Error: " ESC_RST "%s\n", descr);
-}
+//====[ Setup ]=================================================================
 
 static void* _render_thread(void* _crt);
 
@@ -210,7 +198,7 @@ void vm_crt_lineto(vm_crt* crt, float x, float y) {
 
 //====[ The actuall rendering ]=================================================
 
-#define FULL_FADE_TIME (3.0) // 1s
+#define FULL_FADE_TIME 0.1//(3.0) // 1s
 #define BG_COLOR 0.1, 0.1, 0.1
 #define LINE_WIDTH 2.0
 
@@ -247,12 +235,20 @@ const char* shader[2] = {
   "const vec4 bg = vec4(" STR(BG_COLOR) ", 1.0);\n"
   "\n"
   "vec4 color(float t) {\n"
-  "  const vec4 short_fade = vec4(0.7, 0.6, 0.1, 1.0);\n"
-  "  float short_int = max(0, (t - 0.8) * 5);\n"
-  "  const vec4 long_fade = vec4(0.8, 0.8, 0.8, 1.0);\n"
-  "  float long_int = t;\n"
-  "  vec4 phosphor = short_fade * short_int + long_fade * long_int;\n"
-  "  return mix(bg, phosphor / 1.5, (short_int + long_int) / 2.0);\n"
+  "  const vec4 color = vec4(1.00, 0.72, 0.30, 1.0);\n"
+  "  return mix(bg, color, t);"
+  //"  const vec4 short_fade = vec4(0.7, 0.6, 0.1, 1.0);\n"
+  //"  const vec4 short_fade = vec4(0.88, 0.44, 0.33, 1.0);\n"
+  //"  float short_int = max(0, (t - 0.8) * 5);\n"
+  //"  const vec4 long_fade = vec4(0.8, 0.8, 0.8, 1.0);\n"
+  //"  const vec4 long_fade = vec4(0.3, 0.3, 0.3, 1.0);\n"
+  //"  float long_int = t;\n"
+  //"  if (t > 0.8)"
+  //"    return mix(long_fade, short_fade, (t - 0.8) / 0.2);"
+  //"  else"
+  //"    return mix(bg, long_fade, t / 0.8);"
+  //"  vec4 phosphor = short_fade * short_int + long_fade * long_int;\n"
+  //"  return mix(bg, phosphor, (short_int + long_int) / 2.0);\n"
   "}\n"
   "\n"
   "void main() {\n"
@@ -345,6 +341,56 @@ static void _draw_circle(
   _draw_shape(crt, points, time, time, true);
 }
 
+typedef struct {
+  uint16_t scancode;
+  uint8_t action, mods;
+} keyboard_intr_data;
+
+static void _setup_key_interrupt(vm_state* vm, void* _data) {
+  keyboard_intr_data* data = (keyboard_intr_data*) _data;
+  vm->kb_scancode = data->scancode;
+  vm->kb_mods = data->mods;
+  vm->kb_action = data->action;
+  free(data);
+}
+
+static void glfw_key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+
+  vm_crt* crt = (vm_crt*) glfwGetWindowUserPointer(window);
+  check$(crt, "The window must have a pointer to the CRT structure");
+
+  if (action == GLFW_REPEAT) // HACK: until we get interrupt postponing
+    return;
+
+  // FIXME: priority mutexes are needed here, but I just want it to work now
+  pthread_mutex_lock(&crt->vm->mutex);
+
+  keyboard_intr_data* data = (keyboard_intr_data*) calloc(1, sizeof(keyboard_intr_data));
+
+  data->scancode = (uint16_t) key;
+  data->action = (uint8_t) action;
+  data->mods = (uint8_t) mods;
+
+  pthread_mutex_unlock(&crt->vm->mutex);
+
+  vm_state_trigger_interrupt(crt->vm, (vm_interrupt) {.data = data, .type=VM_INTR_KEY, .setup_state=_setup_key_interrupt });
+}
+
+static void gl_debug(GLenum source, GLenum type, unsigned id, GLenum severity,
+              GLsizei length, const GLchar *message, const void *vm) {
+
+  vm_crt* crt = *((vm_crt**) vm);
+  
+  if (crt->vm->log_fn)
+    crt->vm->log_fn(VM_LOG_INFO, "OpenGL debug message: %s", message);
+}
+
+static void gl_error(int error, const char* descr) {
+  // No custom parameter alowed here, sadly
+  fprintf(stdout, ESC_RED "GLFW Error: " ESC_RST "%s\n", descr);
+}
+
+
 static void* _render_thread(void* _crt) {
 
   vm_crt* crt = (vm_crt*) _crt;
@@ -361,12 +407,14 @@ static void* _render_thread(void* _crt) {
   GLFWwindow* win = glfwCreateWindow(800, 800, "IVM", NULL, NULL);
   check$(win, "Failed to open a GLFW window");
   crt->window = win;
+  glfwSetWindowUserPointer(win, (void*) crt);
 
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
   glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
 
   glfwMakeContextCurrent(win);
+  glfwSetKeyCallback(win, glfw_key_callback);
 
   check$(glewInit() == GLEW_OK, "GLEW should initialize");
 

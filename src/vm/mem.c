@@ -137,6 +137,7 @@ static bool _write_crt(
     uint8_t val
   ) {
   if (addr == 0x00134) {
+    // TODO: CRT_SIZE
     if (val == 0)
       vm_crt_goto(state->crt, state->crt_x / 65535.0, state->crt_y / 65535.0);
     else
@@ -148,6 +149,29 @@ static bool _write_crt(
   } else {
     BAD_ACCESS();
   }
+
+  return true;
+}
+
+//-----[ Keyboard ]-------------------------------------------------------------
+
+static bool _read_keyboard(
+    vm_state* state,
+    vm_stack_val_t addr, vm_mem_usage usage,
+    uint8_t* out
+  ) {
+
+  if (usage != VM_MEM_READ)
+    BAD_ACCESS();
+
+  if (addr == 0x00150 || addr == 0x00151)
+    *out = _index_num_const(state->kb_scancode, addr - 0x00150);
+  else if (addr == 0x00152)
+    *out = state->kb_action;
+  else if (addr == 0x00153)
+    *out = state->kb_mods;
+  else
+    BAD_ACCESS();
 
   return true;
 }
@@ -165,6 +189,7 @@ static void _init_sys_segment(void) {
   _assign_fn(0x0100, 0x0120, _read_exception_data, NULL);
   _assign_fn(0x0120, 0x0130, NULL, _write_printer);
   _assign_fn(0x0130, 0x0150, NULL, _write_crt);
+  _assign_fn(0x0150, 0x0160, _read_keyboard, NULL);
 }
 
 //=====[ Implementations ]======================================================
