@@ -65,4 +65,33 @@ bool vm_op_put16(vm_state* state);
 bool vm_op_put32(vm_state* state);
 bool vm_op_put64(vm_state* state);
 
+// (v2)
+// Maybe that design was not the best for big instruction counts
+
+// Second stack
+bool vm_op_gsf(vm_state* state);
+bool vm_op_ssf(vm_state* state);
+bool vm_op_gsp(vm_state* state);
+bool vm_op_ssp(vm_state* state);
+bool vm_op_spush(vm_state* state);
+bool vm_op_spop(vm_state* state);
+bool vm_op_sfbegin(vm_state* state);
+bool vm_op_sfend(vm_state* state);
+bool vm_op_sfload8(vm_state* state);
+bool vm_op_sfload16(vm_state* state);
+bool vm_op_sfload32(vm_state* state);
+bool vm_op_sfload64(vm_state* state);
+bool vm_op_sfstore8(vm_state* state);
+bool vm_op_sfstore16(vm_state* state);
+bool vm_op_sfstore32(vm_state* state);
+bool vm_op_sfstore64(vm_state* state);
+bool vm_op_sadd(vm_state* state);
+
+// Flow control
+bool vm_op_rjmp(vm_state *state);
+bool vm_op_rjmpi(vm_state *state);
+bool vm_op_rcall(vm_state *state);
+bool vm_op_gpc(vm_state *state);
+
+
 #endif

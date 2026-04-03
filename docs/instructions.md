@@ -1,9 +1,11 @@
-# Instruction set
-
-TODO: add alternate push opcodes to push values smaller then 8 bytes.
+# Original instruction set
 
 All opcodes here are hexamedical.
 If any errors happen (division by zero, etc), interrupt `0x0f` is triggered.
+
+When I was writing a compiler for it (a year later), there were some modifications
+to make compiling it slightly easier. They include some new instructions,
+see that in [`v2.md`](v2.md), or in cheatsheet: [`cheatsheet.txt`](cheatsheet.txt).
 
 ## Special instructions
 

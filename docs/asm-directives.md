@@ -33,6 +33,8 @@ This will work without any problems.
 This directive emits bytes corresponding to given string literal.
 No `\0` is added to the end - if you need it, write it yourself.
 
+Supports `\r`, `\n`, `\xNN`, `\0` escapes.
+
 ```asm
 ; Emit a string and compute its length
 my_string:
@@ -40,16 +42,6 @@ my_string:
 end_string:
 
 .const STRING_LEN end_string - my_string
-```
-
-## `.base64 <string>` - Emit sequence of bytes encoded in base64
-
-The main way to embed binary data into programs.
-
-```asm
-data:
-    .base64 "SGVsbG8gd29ybGQhCg=="
-end_data:
 ```
 
 ## `.[iu](8|16|32|64) <expression>` - Embed a number into program

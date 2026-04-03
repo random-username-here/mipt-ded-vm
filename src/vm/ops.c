@@ -336,3 +336,131 @@ VM_GENERIC_PUT(64)
 
 #undef VM_GENERIC_PUT
 
+//=====[ V2 stack ]===============================================================
+
+bool vm_op_gsf(vm_state* state) {
+    ia_push$(&state->stack, state->v2_sf);
+    return false;
+}
+
+bool vm_op_ssf(vm_state* state) {
+    MAY_ERROR
+    state->v2_sf = get$();
+    return false;
+}
+
+bool vm_op_gsp(vm_state* state) {
+    ia_push$(&state->stack, state->v2_sp);
+    return false;
+}
+
+bool vm_op_ssp(vm_state* state) {
+    MAY_ERROR
+    state->v2_sp = get$();
+    return false;
+}
+
+bool vm_op_spush(vm_state* state) {
+    MAY_ERROR
+    vm_stack_val_t val = get$();
+    state->v2_sp -= 8;
+    vm_mem_write(state, state->v2_sp, 8, val);
+    return false;
+}
+
+bool vm_op_spop(vm_state* state) {
+    MAY_ERROR
+    vm_stack_val_t val = 0;
+    vm_mem_read(state, state->v2_sp, 8, VM_MEM_READ, &val);
+    state->v2_sp += 8;
+    ia_push$(&state->stack, val);
+    return false;
+}
+
+bool vm_op_sfbegin(vm_state* state) {
+    MAY_ERROR
+    state->v2_sp -= 8;
+    vm_mem_write(state, state->v2_sp, 8, state->v2_sf);
+    state->v2_sf = state->v2_sp;
+}
+
+bool vm_op_sfend(vm_state* state) {
+    MAY_ERROR
+    vm_stack_val_t prev_sf = 0;
+    vm_mem_read(state, state->v2_sf, 8, VM_MEM_READ, &prev_sf);
+    state->v2_sp = state->v2_sf + 8;
+    state->v2_sf = prev_sf;
+    return false;
+}
+
+#define GEN_SFLOAD(n)\
+    bool vm_op_sfload##n(vm_state* state) {\
+        MAY_ERROR\
+        vm_stack_val_t off = get$();\
+        vm_stack_val_t val = 0;\
+        vm_mem_read(state, state->v2_sf + off, n/8, VM_MEM_READ, &val);\
+        ia_push$(&state->stack, val);\
+        return false;\
+    }
+
+GEN_SFLOAD(8)
+GEN_SFLOAD(16)
+GEN_SFLOAD(32)
+GEN_SFLOAD(64)
+
+#undef GEN_SFLOAD
+
+#define GEN_SFSTORE(n)\
+    bool vm_op_sfstore##n(vm_state *state) {\
+        MAY_ERROR\
+        vm_stack_val_t off = get$();\
+        vm_stack_val_t val = get$();\
+        vm_mem_write(state, state->v2_sf + off, n/8, val);\
+        return false;\
+    }
+
+GEN_SFSTORE(8)
+GEN_SFSTORE(16)
+GEN_SFSTORE(32)
+GEN_SFSTORE(64)
+
+#undef GEN_SFSTORE
+
+bool vm_op_sadd(vm_state* state) {
+    MAY_ERROR
+    vm_stack_val_t off = get$();
+    state->v2_sp += off;
+    return false;
+}
+
+// Flow control
+
+bool vm_op_rjmp(vm_state *state) {
+    MAY_ERROR
+    vm_stack_val_t delta = get$();
+    state->pc += delta;
+    return true;
+}
+
+bool vm_op_rjmpi(vm_state *state) {
+    MAY_ERROR
+    vm_stack_val_t delta = get$();
+    vm_stack_val_t cond = get$();
+    if (cond == 0) return false;
+    state->pc += delta;
+    return true;
+}
+
+bool vm_op_rcall(vm_state *state) {
+    MAY_ERROR
+    vm_stack_val_t delta = get$();
+    ia_push$(&state->stack, state->pc + 1);
+    state->pc += delta;
+    return true;
+}
+
+bool vm_op_gpc(vm_state *state) {
+    ia_push$(&state->stack, state->pc);
+    return false;
+}
+

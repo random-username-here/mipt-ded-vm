@@ -24,10 +24,14 @@ typedef enum {
   AST_DIR_CONST,
 
   /// String/base64 directive, like `.ascii "Hello world\n\0"`
+  /// Includes also fall under this
   AST_DIR_BLOB,
 
   /// Number directive, like `.u32 0xff00ff00`
-  AST_DIR_NUMBER
+  AST_DIR_NUMBER,
+
+  /// Symbol type, like `.func`
+  AST_DIR_SYMTYPE
 
 } ast_node_type;
 
@@ -41,7 +45,8 @@ typedef struct {
     /// AST_INSTR
     struct {
       ivm_span name;
-      ivm_span args;
+      ia_arr$(ivm_span) args;
+      size_t pc;
     } as_instr;
 
     /// AST_LABEL
@@ -68,6 +73,10 @@ typedef struct {
       ivm_span number_expr;
     } as_dir_number;
 
+    // AST_DIR_SYMTYPE
+    struct {
+      ivm_span dir_name;
+    } as_dir_symtype;
   };
 } ast_node;
 

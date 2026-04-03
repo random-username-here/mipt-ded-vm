@@ -40,13 +40,20 @@ static ivm_span parse_directive(ivm_span span, ivm_span dir_name, ast_node* out)
     return ivm_span_slice(span, ivm_span_slice_to_end, ivm_span_slice_to_end);
   }
 
-  else if (ivm_span_equals_to_str(dir_name, ".ascii") || ivm_span_equals_to_str(dir_name, ".base64")) {
+  else if (ivm_span_equals_to_str(dir_name, ".func") 
+          || ivm_span_equals_to_str(dir_name, ".table") 
+          || ivm_span_equals_to_str(dir_name, ".string")) {
+    // TODO
+    out->type = AST_DIR_SYMTYPE;
+    out->as_dir_symtype.dir_name = dir_name;
+    return ivm_span_slice(span, ivm_span_slice_to_end, ivm_span_slice_to_end);
+  }
+
+  else if (ivm_span_equals_to_str(dir_name, ".ascii") || ivm_span_equals_to_str(dir_name, ".include")) {
     // Some blob
     span = ivm_trim_ws(span);
     ivm_span str;
     span = ivm_match_string(span, &str);
-
-
 
     span = ivm_trim_ws_and_comments(span);
 
@@ -90,6 +97,21 @@ static ivm_span parse_directive(ivm_span span, ivm_span dir_name, ast_node* out)
     ivm_report(REPORT_ERROR, dir_name, "Unknown directive");
     exit(EX_DATAERR);
   }
+}
+
+static void parse_args(ivm_span line, ia_arr$(ivm_span) *args_arr) {
+    while(1) {
+        line = ivm_trim_ws_and_comments(line);
+        if (ivm_span_is_empty(line))
+            break;
+        size_t pos = 0;
+        while (pos < ivm_span_get_length(line) && ivm_span_get_char(line, pos) != ',')
+            ++pos;
+        ia_push$(args_arr, ivm_span_slice(line, 0, pos));
+        if (pos == ivm_span_get_length(line))
+            break;
+        line = ivm_span_slice(line, pos+1 /* skip comma */, ivm_span_slice_to_end);
+    }
 }
 
 static ivm_span parse_one(ivm_span line, ast_node* out) {
@@ -141,7 +163,8 @@ static ivm_span parse_one(ivm_span line, ast_node* out) {
     // A instruction
     out->type = AST_INSTR;
     out->as_instr.name = name;
-    out->as_instr.args = line;
+    out->as_instr.args = ia_new_empty_array$(ivm_span);
+    parse_args(line, &out->as_instr.args);
     return ivm_span_slice(line, ivm_span_slice_to_end, ivm_span_slice_to_end);
   }
 
@@ -209,8 +232,14 @@ void iasm_dump_ast(ia_arr$(ast_node) ast) {
       case AST_INSTR:
         fputs(ESC_BLUE "  ", stdout);
         ivm_span_fprint(stdout, ast[i].as_instr.name);
-        fputs(ESC_RST " " ESC_YELLOW, stdout);
-        ivm_span_fprint(stdout, ast[i].as_instr.args);
+        for (size_t i = 0; i < ia_length(ast[i].as_instr.args); ++i) {
+            fputs(ESC_YELLOW, stdout);
+            ivm_span_fprint(stdout, ast[i].as_instr.args[i]);
+            if (i == ia_length(ast[i].as_instr.args) - 1)
+                fputs(ESC_RST "\n", stdout);
+            else
+                fputs(ESC_GRAY ", ", stdout);
+        }
         break;
 
       case AST_DIR_CONST:

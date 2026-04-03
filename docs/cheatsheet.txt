@@ -1,0 +1,74 @@
+
+                                 _
+                                (_)   ______ ___
+                               / / | / / __ `__ \
+                              / /| |/ / / / / / /
+                             /_/ |___/_/ /_/ /_/
+
+                                The Cheatsheet
+
+====== Instructions ============================================================
+
+    Most instructions ar encoded as one byte. Exception is PUSH, which is one
+    byte for PUSH and 8 bytes for the value.
+    
+    = Math          = Comparsion    = First stack       = Jumps & flow
+    01 r ADD a b    10 r EQ a b     20 DROP x           30 JMP to
+    02 r SUB a b    11 r ISZERO v   21 r PUSH $v        31 JNZ to
+    03 r MUL a b    12 r LT a b     22 r PULL off       32 CALL to
+    04 r DIV a b    13 r LE a b     23 r r DUP r        33 INT n
+    05 r MOD a b    14 r GT a b     24 r' FSWAP r' off  34 STI
+    06 r SNE a b    15 r GE a b     25 b a SWAP a b     35 CLI
+    07 r LSH x n                                        36 FINI
+    08 r RSH x n        = Second stack (v2)             37 RJMP  \
+                        50 sf GSF                       38 RJNZ  | v2
+    = Memory            51 SSF sf     60 SADD n         39 RCALL |
+    40 r GET8 addr      52 sp GSP                       3a GPC   /
+    41 r GET16 addr     53 SSP sp
+    42 r GET32 addr     54 SPUSH val                    
+    43 r GET64 addr     55 val SPOP
+    44 PUT8 r addr      56 SFBEGIN
+    45 PUT16 r addr     57 SFEND
+    46 PUT32 r addr     58..5b n SFLOADnn off
+    47 PUT64 r addr     5c..5f SFSTOREnn n off
+
+====== Interrupts ==============================================================
+
+    There are total of 31 interrupts. They are numbered 1 to 31. Each can be
+    triggered manually. Interrupts above 16 will never be autotriggered.
+
+    Currently there are 3 interrupts which are triggered externally:
+
+    01  INTR_TIMER1     Timer
+    08  INTR_KEY        Key pressed on keyboard
+    0F  INTR_EXCEPTION  Processor encountered a problem (division by zero, etc)
+
+    Interrupt handlers are set by putting handler address into interrupt table.
+
+====== Memory & devices ========================================================
+
+    We have 128K memory. Memory is split into three parts:
+
+    00000 -- 01000      RW      4K of memory-mapped devices and control regs
+    01000 -- 10000      RWX     60K of RAM
+    10000 -- 20000      RX      64K of ROM
+
+    In first 4K memory map is this:
+
+    00000 -- 00008  ... NULL zone. Reading or writting will area will segfault
+    00008 -- 00100  ... Interrupt table. Array of 8byte adresses
+    00100 -- 00120  ... Exception data, which contains:
+    00100           i8      Exception type
+    00101           i64     PC at which it happened
+    00109           i64     Address to which access failed (for segfault)
+    00120 -- 00130  ... Printer (terminal output)
+    00120           i8      Write here => printer prints that char
+    00130 -- 00150  ... CRT
+    00130           i16     Target ray x (0 to 2^16-1, left to right)
+    00132           i16     Target ray y (0 to 2^16-1, top to bottom)
+    00134           i8      Command (0 = move, 1 = draw line)
+    00135           i8      1 if CRT is present (v2 only)
+    00150 -- 00160  ... Keyboard
+    00150           i16     GLFW key code
+    00152           i8      Key state (0 release, 1 press, 2 repeat)
+    00153           i8      GLFW modifier bits

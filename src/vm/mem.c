@@ -1,6 +1,7 @@
 #include "ivm/vm/mem.h"
 #include "ivm/vm/crt.h"
 #include "ivm/vm/state.h"
+#include <ctype.h>
 #include <endian.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -117,14 +118,25 @@ static bool _read_exception_data(
 
 //-----[ Printer ]--------------------------------------------------------------
 
+static char xdigits[] = "0123456789abcdef";
+
 static bool _write_printer(
       vm_state* state,
       vm_stack_val_t addr,
       uint8_t val
     ) {
 
-  if (state->printer_putc)
-    state->printer_putc((char) val);
+  if (state->printer_putc) {
+    if (isgraph(val) || isspace(val)) {
+      state->printer_putc((char) val);
+    } else {
+      state->printer_putc('\\');
+      state->printer_putc('x');
+      state->printer_putc(xdigits[val / 16]);
+      state->printer_putc(xdigits[val % 16]);
+    }
+
+  }
 
   return true;
 }
@@ -245,6 +257,9 @@ static bool _write_byte(
       vm_state* state, vm_stack_val_t addr,
       uint8_t val
     ) {
+
+  if (addr < 0)
+      BAD_ACCESS();
   
   //printf("Write %p = %d\n", addr, val);
 

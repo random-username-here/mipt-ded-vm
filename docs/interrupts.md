@@ -4,6 +4,12 @@ There are 32 interrupts. Each interrupt has its entry in interrupt
 table (`0x00000 - 0x00100`), which specifies what should be `call`-ed
 when it happens.
 
+There are 3 harware-triggered interrupts:
+
+ - `0x01` -- `INTR_TIMER1` -- Timer interrupt, which triggers at interval at 1/30th of a second
+ - `0x08` -- `INTR_KEY` -- A key was pressed/released/repeated
+ - `0x0f` -- `INTR_EXCEPTION` -- Exception was raised (division by zero/segfault/bad opcode)
+
 To exit an interrupt do `fini`.
 
 Example of exception handling interrupt:

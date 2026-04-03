@@ -48,21 +48,15 @@ X and Y coordinates are unsigned, from 0 at top left corner to 65535 at bottom r
 All the keyboard input is based on GLFW, so the keyboard interrupt (`$08`) is
 just a wrapper around GLFW key callback.
 
- - `[$00150; $00152)` contains GLFW key token of the pressed key.
-   You can lookup them [on this page](https://www.glfw.org/docs/latest/group__keys.html)
+ - `[$00150; $00152)` contains GLFW (v1) / Raylib (v2) key number of the pressed key.
 
  - `$00152` contains:
     - `0` if key was released
     - `1` if key was pressed
     - `2` if key was held down untill it repeated
-   (this corresponds to `GLFW_RELEASE`, `GLFW_PRESS` and `GLFW_REPEAT`)
 
  - `$00153` has the GLFW keyboard modifier bits, such as Control, Alt and Super.
 
 Note what some of the complex keybindings may be impossible to enter because
 they are mapped to something like closing the window. This program will not
 capture all the input, unlike something serious like QEMU.
-
-# TODO
-
-Make a vector display?

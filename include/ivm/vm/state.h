@@ -11,7 +11,6 @@
 #include "ivm/common/array.h"
 #include <stdatomic.h>
 #include <stdbool.h>
-#include <pthread.h>
 #include <stdint.h>
 
 #define NUM_INTERRUPTS 31
@@ -117,7 +116,7 @@ typedef enum {
 } vm_log_type;
 
 
-typedef long long vm_stack_val_t;
+typedef int64_t vm_stack_val_t;
 
 struct vm_crt;
 
@@ -154,27 +153,12 @@ typedef struct vm_state {
   bool should_die;
 
   //---- Interrupts
-  // A lot of pthread stuff here
 
   // If all interrupts are disabled
   bool interrupts_disabled;
 
   // Addresses of all the interrupt handlers
   vm_stack_val_t interrupt_vector[NUM_INTERRUPTS];
-
-  // If someone wants to ask for interrupts
-  atomic_size_t num_waiting_to_ask_interrupts;
-
-  // Condition when all asked interrupts are added
-  pthread_cond_t interrupts_are_written;
-  pthread_mutex_t interrupts_are_written_mutex;
-
-  // Taken when somebody wants to do something with this structure
-  pthread_mutex_t mutex;
-
-  // Condition to wake up from `hlt`
-  pthread_cond_t wake_up;
-  pthread_mutex_t wake_up_mutex;
 
   // Type of the current interrupt
   // (top item is currently handled)
@@ -210,6 +194,10 @@ typedef struct vm_state {
   struct vm_crt* crt;
 
   vm_stack_val_t crt_x, crt_y;
+
+  //---- V2
+
+  vm_stack_val_t v2_sp, v2_sf;
 
 } vm_state;
 

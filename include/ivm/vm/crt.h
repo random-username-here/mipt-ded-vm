@@ -7,7 +7,7 @@
 
 #include "ivm/common/array.h"
 #include "ivm/vm/state.h"
-#include <GLFW/glfw3.h>
+//#include <GLFW/glfw3.h>
 #include <pthread.h>
 
 typedef struct __attribute__((packed)) {
@@ -28,9 +28,7 @@ typedef struct {
 } _vm_crt_segment;
 
 typedef struct vm_crt {
-  GLFWwindow* window;
   vm_state* vm;
-  pthread_t render_thread;
 
   // This is a CRT, so we are drawing lines,
   // which consist of points.
@@ -40,23 +38,22 @@ typedef struct vm_crt {
   size_t oldest_idx;
   size_t newest_idx;
   _vm_crt_point cursor;
-
-  unsigned shader_program;
-  unsigned array_buffer, elem_buffer, vertex_array;
-  unsigned circle_uniform;
-
   _vm_crt_point screen_size;
+  ia_arr$(int) keys;
 
   bool should_exit;
   bool was_closed;
+  double prev_update_time;
 } vm_crt;
 
 /// \brief Create a new CRT window
 ///
-/// Opens the window, launches a rendering thread,
-/// returns the object
+/// Opens the window, returns the object
 ///
 vm_crt* vm_crt_new(vm_state* vm);
+
+/// \brief Perform CRT event handling
+void vm_crt_loop(vm_crt *crt);
 
 /// \brief Destroy the CRT window
 ///

@@ -2,10 +2,9 @@
 #include "ivm/common/array.h"
 #include "ivm/common/macros.h"
 #include "ivm/vm/mem.h"
-#include <bits/pthreadtypes.h>
-#include <pthread.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 #define CHECKED(...) ? (die$(__VA_ARGS__),0) : 0
 
@@ -36,19 +35,6 @@ vm_state* vm_state_new (void) {
   state->interrupt_return_addr = ia_new_empty_array$(vm_stack_val_t);
   state->asked_interrupts = ia_new_empty_array$(vm_interrupt);
 
-  pthread_mutexattr_t attr;
-  pthread_mutexattr_init(&attr) CHECKED("Must init mutex attr");
-  pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE) CHECKED("Must set mutex attr type");
-
-  pthread_mutex_init(&state->mutex, &attr) CHECKED("Mutex must be initialized");
-  pthread_mutex_init(&state->wake_up_mutex, &attr) CHECKED("Mutex must be initialized");
-  pthread_mutex_init(&state->interrupts_are_written_mutex, &attr) CHECKED("Mutex must be initialized");
-
-  pthread_mutexattr_destroy(&attr) CHECKED("Must destroy the mutex attr");
-
-  pthread_cond_init(&state->wake_up, NULL) CHECKED("Wakeup condition must initialize");
-  pthread_cond_init(&state->interrupts_are_written, NULL) CHECKED("Condition must initialize");
-
   //---- Exceptions
 
   state->exception_pc = 0;
@@ -59,6 +45,10 @@ vm_state* vm_state_new (void) {
   state->crt_x = 0xffff / 2;
   state->crt_y = 0xffff / 2;
 
+  //---- v2
+  state->v2_sp = 0;
+  state->v2_sf = 0;
+
   return state;
 }
 
@@ -67,29 +57,12 @@ void vm_state_destroy(vm_state *state) {
   check$(state, "VM state to be destroyed must be present");
 
   free(state->ram);
-
-  pthread_cond_destroy(&state->wake_up);
-  pthread_cond_destroy(&state->interrupts_are_written);
-
-  pthread_mutex_destroy(&state->mutex);
-  pthread_mutex_destroy(&state->wake_up_mutex);
-  pthread_mutex_destroy(&state->interrupts_are_written_mutex);
 }
 
 void vm_state_trigger_interrupt(vm_state* state, vm_interrupt intr) {
 
   check$(state, "Should get a valid state");
   check$(intr.type < NUM_INTERRUPTS, "Interrupts are in range [0; %d), got number %d", NUM_INTERRUPTS, intr);
-
-  //state->log_fn(VM_LOG_INFO, "Triggering an interrupt");
-
-  // TODO: better understand this hell
-  // https://stackoverflow.com/questions/11666610/how-to-give-priority-to-privileged-thread-in-mutex-locking
-  ++state->num_waiting_to_ask_interrupts;
-  pthread_mutex_lock(&state->mutex);
-  --state->num_waiting_to_ask_interrupts;
-  
-  //state->log_fn(VM_LOG_INFO, ".. locked the state");
 
   if (!state->interrupts_disabled || intr.type == VM_INTR_EXCEPTION) {
     // Exception is non-maskable
@@ -100,25 +73,14 @@ void vm_state_trigger_interrupt(vm_state* state, vm_interrupt intr) {
     if (state->is_halted) {
       // Machine is halted, it currently does nothing
       // Wake it up.
-      //state->log_fn(VM_LOG_INFO, ".. waking up the machine");
-      pthread_mutex_lock(&state->wake_up_mutex);
-      pthread_cond_signal(&state->wake_up);
-      pthread_mutex_unlock(&state->wake_up_mutex);
+      state->is_halted = false;
     }
-    pthread_mutex_lock(&state->interrupts_are_written_mutex);
-    pthread_cond_signal(&state->interrupts_are_written);
-    pthread_mutex_unlock(&state->interrupts_are_written_mutex);
   }
-
-  pthread_mutex_unlock(&state->mutex);
 }
 
 void vm_state_halt(vm_state* state) {
 
   check$(state, "Should get a valid state");
-
-  // No asking for interrupts while we are doing stuff
-  pthread_mutex_lock(&state->mutex);
 
   if (state->is_halted) {
     if (state->log_fn)
@@ -138,45 +100,8 @@ void vm_state_halt(vm_state* state) {
       );
     state->should_die = true;
     // Just return back to quit the loop
-    pthread_mutex_unlock(&state->mutex);
     return;
   }
-
-  pthread_mutex_unlock(&state->mutex);
-  pthread_mutex_unlock(&state->mutex); // FIXME! we unlock mutex locked second time by mainloop
-
-  //state->log_fn(VM_LOG_INFO, "Halted, waiting wake up call");
-  pthread_mutex_lock(&state->wake_up_mutex);
-  //state->log_fn(VM_LOG_INFO, ".. locked wake up mutex");
-
-  bool should_wake_up = false;
-  while (!should_wake_up) {
-
-    // Wait until someone calls for wakeup
-    //state->log_fn(VM_LOG_INFO, ".. waiting for condition");
-    pthread_cond_wait(&state->wake_up, &state->wake_up_mutex);
-    //state->log_fn(VM_LOG_INFO, ".. somebody triggered a wake up call");
-
-    // Check if they have something worth waking up for
-    pthread_mutex_lock(&state->mutex);
-    //state->log_fn(VM_LOG_INFO, ".. %zu interrupts asked", ia_length(state->asked_interrupts));
-
-    for (size_t i = 0; i < ia_length(state->asked_interrupts); ++i) {
-      if (!ia_length(state->interrupt_type) || 
-          vm_interrupt_priority[ia_top$(state->interrupt_type)]
-          < vm_interrupt_priority[state->asked_interrupts[i].type]) {
-        // This is more important then what we are doing now
-        should_wake_up = true;
-        state->is_halted = false;
-        break;
-      }
-    }
-
-    pthread_mutex_unlock(&state->mutex);
-  }
-
-  pthread_mutex_unlock(&state->wake_up_mutex);
-  pthread_mutex_lock(&state->mutex); // FIXME: we lock back locked mutex by mainloop
 }
 
 void vm_state_mount_rom(vm_state* state, uint8_t* rom, size_t rom_size) {
@@ -184,20 +109,14 @@ void vm_state_mount_rom(vm_state* state, uint8_t* rom, size_t rom_size) {
   check$(state, "Should get a valid state");
   check$(rom_size == 0 || state, "ROM data pointer can only be NULL if ROM size is 0");
 
-  pthread_mutex_lock(&state->mutex);
-
   state->rom = rom;
   state->rom_size = rom_size;
-
-  pthread_mutex_unlock(&state->mutex);
 }
 
 void vm_state_raise_exception(vm_state* state, vm_exception_type type) {
 
   check$(state, "Should get a valid state");
   check$(type != VM_EXC_NONE, "Should provide an exception to raise, but got no exception value");
-
-  pthread_mutex_lock(&state->mutex);
 
   if (ia_length(state->interrupt_type) && ia_top$(state->interrupt_type) == VM_INTR_EXCEPTION) {
     // FIXME: print exception type
@@ -224,7 +143,6 @@ void vm_state_raise_exception(vm_state* state, vm_exception_type type) {
       .data = NULL
   });
 
-  pthread_mutex_unlock(&state->mutex);
 }
 
 const char* vm_strerr(vm_exception_type exc) {
@@ -252,51 +170,58 @@ void vm_log_error(vm_state* state) {
   if (state->log_fn) {    
     state->log_fn(
         VM_LOG_ERROR,
-        "%s  @ pc = %p",
+        ESC_RED ESC_BOLD "%s " ESC_RST ESC_GRAY "@ " ESC_BLUE "pc " ESC_GRAY "= " ESC_YELLOW "%p" ESC_RST,
         vm_strerr(state->exception_type),
         state->exception_pc
     );
 
     if (state->exception_type == VM_EXC_SEGFAULT) {
       state->log_fn(
-          VM_LOG_INFO,
-          "This happaned while accessing address %p",
+          VM_LOG_ERROR,
+          "This happaned while accessing address " ESC_YELLOW "%p" ESC_RST,
           (void*) (uintptr_t) state->exception_segfault_addr
       );
     } else if (state->exception_type == VM_EXC_UNKNOWN_OPCODE) {
       vm_stack_val_t opcode;
       vm_mem_read(state, state->exception_pc, 1, VM_MEM_READ, &opcode);
       state->log_fn(
-          VM_LOG_INFO,
-          "Opcode of this instruction is %02x", (int) opcode
+          VM_LOG_ERROR,
+          "Opcode of this instruction is " ESC_YELLOW "%02x" ESC_RST, (int) opcode
       );
     }
-
+    
     state->log_fn(
-      VM_LOG_INFO,
+        VM_LOG_ERROR,
+        "Regs: " ESC_BLUE "sp " ESC_GRAY "= " ESC_YELLOW "0x%05x"
+        ESC_GRAY ", " ESC_BLUE "sf " ESC_GRAY "=" ESC_YELLOW " 0x%05x" ESC_RST,
+        state->v2_sp, state->v2_sf
+    );
+    state->log_fn(
+      VM_LOG_ERROR,
       "Stack contents: (from top down):"
     );
 
     const size_t MAX_ITEMS = 32;
 
     for (size_t i = 0; i < ia_length(state->stack) && i < MAX_ITEMS; ++i) {
+      vm_stack_val_t val = state->stack[ia_length(state->stack) - 1 - i];
       state->log_fn(
-        VM_LOG_INFO,
-        "  top - %zu:  %lld", i, state->stack[ia_length(state->stack) - 1 - i]
+        VM_LOG_ERROR,
+        "    " ESC_BLUE "-%zu" ESC_GRAY " :  " ESC_YELLOW "%lld" ESC_GRAY " = " ESC_YELLOW "0x%x" ESC_RST, i, val, val
       );
     }
 
     if (ia_length(state->stack) > MAX_ITEMS) {
       state->log_fn(
-        VM_LOG_INFO,
+        VM_LOG_ERROR,
         "  ... and %zu more items", ia_length(state->stack) - MAX_ITEMS
       );
     }
 
     if (ia_length(state->stack) == 0) {
       state->log_fn(
-        VM_LOG_INFO,
-        "  <stack is empty>" 
+        VM_LOG_ERROR,
+        ESC_GRAY "  <stack is empty>" ESC_RST
       );
 
     }

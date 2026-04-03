@@ -1,120 +1,19 @@
-#include <GL/glew.h>
-#include <GL/glext.h>
-#include <GLFW/glfw3.h>
 #include <math.h>
-#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <raylib.h>
 #include "ivm/vm/crt.h"
 #include "ivm/common/array.h"
 #include "ivm/common/macros.h"
+#include "ivm/vm/mainloop.h"
 #include "ivm/vm/state.h"
 
-//====[ Helper functions ]======================================================
-
-#define INFO_LOG_BUF_SIZE 1024
-
-/// Compile given shader
-static unsigned compile_shader_or_die(GLenum type, const char* code) {
-
-  check$(code, "Shader source to compile must be present");
-
-  // Create new shader
-  unsigned shader = glCreateShader(type);
-
-  // Attach source to it
-  int code_len = strlen(code);
-  glShaderSource(shader, 1, &code, &code_len);
-
-  // Compile
-  glCompileShader(shader);
-
-  // Check for errors
-  GLint res;
-  glGetShaderiv(shader, GL_COMPILE_STATUS, &res);
-  if (res != GL_TRUE) { // There were errors
-    char info[INFO_LOG_BUF_SIZE];
-glGetShaderInfoLog(shader, INFO_LOG_BUF_SIZE, NULL, info);
-    die$(
-        "Failed to compile %s shader:\n%s",
-        (type == GL_FRAGMENT_SHADER ? "fragment" : "vertex"), 
-        info
-    );
-  }
-
-  // Done
-  return shader;
-}
-
-/// Construct program out of vertex and fragment shader
-/// sources.
-unsigned make_program_or_die(const char* vsh, const char* fsh) {
-  
-  unsigned fragment_shader = compile_shader_or_die(GL_FRAGMENT_SHADER, fsh),
-           vertex_shader = compile_shader_or_die(GL_VERTEX_SHADER, vsh);
-
-  // Assemble program
-  unsigned program = glCreateProgram();
-  glAttachShader(program, vertex_shader);
-  glAttachShader(program, fragment_shader);
-  glLinkProgram(program);
-
-  // Check for link errors
-  GLint res;
-  glGetProgramiv(program, GL_LINK_STATUS, &res);
-  if (res != GL_TRUE) {
-    char info[INFO_LOG_BUF_SIZE];
-    glGetProgramInfoLog(program, INFO_LOG_BUF_SIZE, NULL, info);
-    die$("Failed to link shader program together:\n%s", info);
-  }
-
-  glDeleteShader(fragment_shader);
-  glDeleteShader(vertex_shader);
-
-  // We are done
-  return program;
-}
-
-
-//====[ Setup ]=================================================================
-
-static void* _render_thread(void* _crt);
-
-vm_crt* vm_crt_new(vm_state* vm) {
-
-  check$(vm, "You should provide a VM for which window is opened");
-
-  // Setup the data structure
-
-  vm_crt* crt = (vm_crt*) calloc(sizeof(vm_crt), 1);
-  check$(crt, "CRT data structure must be allocated");
-  crt->vm = vm;
-
-  crt->seg_pool = ia_new_empty_array$(size_t);
-  crt->segs = ia_new_empty_array$(_vm_crt_segment);
-  crt->oldest_idx = -1;
-  crt->newest_idx = -1;
-  crt->cursor = (_vm_crt_point) { 0.5f, 0.5f };
-  crt->should_exit = crt->was_closed = false;
-  pthread_mutex_init(&crt->mutex, NULL);
-
-  pthread_create(&crt->render_thread, NULL, _render_thread, crt);
-
-  vm->crt = crt;
-
-  return crt;
-}
-
-void vm_crt_destroy(vm_crt* crt) {
-  
-  check$(crt, "There should be some `vm_crt` instance to destroy");
-
-  crt->should_exit = true;
-  pthread_join(crt->render_thread, NULL);
-  pthread_mutex_destroy(&crt->mutex);
-}
+#define TIME_BETWEEN_TICKS (1.0 / 30)
+#define FULL_FADE_TIME 0.2 
+#define BG_COLOR 0.1, 0.1, 0.1
+#define LINE_WIDTH 2.0
 
 //====[ Drawing ]===============================================================
 
@@ -138,16 +37,12 @@ static size_t _new_segment(vm_crt* crt) {
 
 static void _vm_crt_move(vm_crt* crt, float x, float y, bool stroke) {
 
-  //printf("%smove %f %f\x1b[0m\n", (stroke ? "" : "\x1b[90m"), x, y);
-
-  pthread_mutex_lock(&crt->mutex);
-
   size_t seg = _new_segment(crt);
   crt->segs[seg].start = crt->cursor;
   crt->cursor = (_vm_crt_point) { .x=x, .y = y };
   crt->segs[seg].next_idx = -1;
 
-  double now = glfwGetTime();
+  double now = vm_time_ns() / 1.0e9;
   if (stroke) {
 
     crt->segs[seg].line_end_time = now;
@@ -183,9 +78,6 @@ static void _vm_crt_move(vm_crt* crt, float x, float y, bool stroke) {
   }
 
   crt->newest_idx = seg;
-
-
-  pthread_mutex_unlock(&crt->mutex);
 }
 
 void vm_crt_goto(vm_crt* crt, float x, float y) {
@@ -198,148 +90,8 @@ void vm_crt_lineto(vm_crt* crt, float x, float y) {
 
 //====[ The actuall rendering ]=================================================
 
-#define FULL_FADE_TIME 0.1//(3.0) // 1s
-#define BG_COLOR 0.1, 0.1, 0.1
-#define LINE_WIDTH 2.0
-
 #define STR2(...) #__VA_ARGS__
 #define STR(v) STR2(v)
-
-const char* shader[2] = {
-
-  // Just output the given position
-  // Considering time: 1 is the current moment, 0 is the oldest rendered moment.
-  // UV-s are between -1 and 1
-  "#version 330 core\n"
-  "layout (location = 0) in vec3 aPos;\n"
-  "layout (location = 1) in float aTime;\n"
-  "layout (location = 2) in vec2 aUV;\n"
-  "\n"
-  "out float time;\n"
-  "out vec2 uv;\n"
-  "\n"
-  "void main() {\n"
-  "  gl_Position = vec4(aPos.x * 2.0 - 1.0, -(aPos.y * 2.0 - 1.0), aPos.z, 1.0);\n"
-  "  time = aTime;\n"
-  "  uv = aUV;\n"
-  "}\n",
-
-  "#version 330 core\n"
-  "\n"
-  "out vec4 FragColor;\n"
-  "uniform bool is_circle;\n"
-  "\n"
-  "in float time;\n"
-  "in vec2 uv;\n"
-  "\n"
-  "const vec4 bg = vec4(" STR(BG_COLOR) ", 1.0);\n"
-  "\n"
-  "vec4 color(float t) {\n"
-  "  const vec4 color = vec4(1.00, 0.72, 0.30, 1.0);\n"
-  "  return mix(bg, color, t);"
-  //"  const vec4 short_fade = vec4(0.7, 0.6, 0.1, 1.0);\n"
-  //"  const vec4 short_fade = vec4(0.88, 0.44, 0.33, 1.0);\n"
-  //"  float short_int = max(0, (t - 0.8) * 5);\n"
-  //"  const vec4 long_fade = vec4(0.8, 0.8, 0.8, 1.0);\n"
-  //"  const vec4 long_fade = vec4(0.3, 0.3, 0.3, 1.0);\n"
-  //"  float long_int = t;\n"
-  //"  if (t > 0.8)"
-  //"    return mix(long_fade, short_fade, (t - 0.8) / 0.2);"
-  //"  else"
-  //"    return mix(bg, long_fade, t / 0.8);"
-  //"  vec4 phosphor = short_fade * short_int + long_fade * long_int;\n"
-  //"  return mix(bg, phosphor, (short_int + long_int) / 2.0);\n"
-  "}\n"
-  "\n"
-  "void main() {\n"
-  "  if (!is_circle || uv.x * uv.x + uv.y * uv.y < 1.0)\n"
-  "    FragColor = color(time);\n"
-  "  else\n"
-  "    discard;\n"
-  "}\n"
-};
-
-/// \brief Draw a circle or rectangle
-/// `start_time` is applied to points 0 and 1, `end_time` to points 2 and 3.
-static void _draw_shape(vm_crt *crt, _vm_crt_point points[4], float start_time, float end_time, bool is_circle) {
-
-  struct __attribute__((packed)) {
-    _vm_crt_point point;
-    float z;
-    float time;
-    _vm_crt_point uv;
-  } buffer[4] = {0};
-
-  // 0       1
-  // o-------o   start
-  // |\      |
-  // |  \    |
-  // |    \  |
-  // |      \|
-  // o-------o   end
-  // 2       3
-
-  for (size_t i = 0; i < 4; ++i) {
-    buffer[i].point = points[i];
-    buffer[i].z = 0;
-  }
-
-  buffer[0].time = buffer[1].time = start_time;
-  buffer[2].time = buffer[3].time = end_time;
-
-  buffer[0].uv = (_vm_crt_point) { -1, -1 };
-  buffer[1].uv = (_vm_crt_point) {  1, -1 };
-  buffer[2].uv = (_vm_crt_point) { -1,  1 };
-  buffer[3].uv = (_vm_crt_point) {  1,  1 };
-
-  glBindVertexArray(crt->vertex_array);
-  glBufferData(GL_ARRAY_BUFFER, sizeof(buffer), buffer, GL_DYNAMIC_DRAW);
-
-  glUseProgram(crt->shader_program);
-  glUniform1i(crt->circle_uniform, is_circle ? 1 : 0);
-
-  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);  
-}
-
-static void _draw_line(
-      vm_crt *crt,
-      _vm_crt_point begin, _vm_crt_point end, float width,
-      float begin_time, float end_time
-  ) {
-  
-  float dx = end.x - begin.x, dy = end.y - begin.y;
-  float nx = -dy, ny = dx;
-  float norm_len = sqrtf(nx*nx + ny*ny);
-  nx /= norm_len * crt->screen_size.x; ny /= norm_len * crt->screen_size.y;
-  float w2 = width / 2;
-
-  _vm_crt_point points[4] = {
-    (_vm_crt_point) { .x = begin.x + nx * w2, .y = begin.y + ny * w2 },
-    (_vm_crt_point) { .x = begin.x - nx * w2, .y = begin.y - ny * w2 },
-    (_vm_crt_point) { .x = end.x   + nx * w2, .y = end.y   + ny * w2 },
-    (_vm_crt_point) { .x = end.x   - nx * w2, .y = end.y   - ny * w2 },
-  };
-
-  _draw_shape(crt, points, begin_time, end_time, false);
-}
-
-static void _draw_circle(
-    vm_crt* crt,
-    _vm_crt_point at, float r,
-    float time
-  ) {
-
-  float rx = r / crt->screen_size.x;
-  float ry = r / crt->screen_size.y;
-
-  _vm_crt_point points[4] = {
-    (_vm_crt_point) { .x = at.x - rx, .y = at.y - ry },
-    (_vm_crt_point) { .x = at.x + rx, .y = at.y - ry },
-    (_vm_crt_point) { .x = at.x - rx, .y = at.y + ry },
-    (_vm_crt_point) { .x = at.x + rx, .y = at.y + ry },
-  };
-  _draw_shape(crt, points, time, time, true);
-}
 
 typedef struct {
   uint16_t scancode;
@@ -354,184 +106,162 @@ static void _setup_key_interrupt(vm_state* vm, void* _data) {
   free(data);
 }
 
-static void glfw_key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
-
-  vm_crt* crt = (vm_crt*) glfwGetWindowUserPointer(window);
-  check$(crt, "The window must have a pointer to the CRT structure");
-
-  if (action == GLFW_REPEAT) // HACK: until we get interrupt postponing
-    return;
-
-  // FIXME: priority mutexes are needed here, but I just want it to work now
-  pthread_mutex_lock(&crt->vm->mutex);
-
-  keyboard_intr_data* data = (keyboard_intr_data*) calloc(1, sizeof(keyboard_intr_data));
-
-  data->scancode = (uint16_t) key;
-  data->action = (uint8_t) action;
-  data->mods = (uint8_t) mods;
-
-  pthread_mutex_unlock(&crt->vm->mutex);
-
-  vm_state_trigger_interrupt(crt->vm, (vm_interrupt) {.data = data, .type=VM_INTR_KEY, .setup_state=_setup_key_interrupt });
+static int l_collect_mods(void) {
+    int mods = 0;
+    if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT))
+        mods |= 1;
+    if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
+        mods |= 2;
+    // TODO: other modifiers
+    return mods;
 }
 
-static void gl_debug(GLenum source, GLenum type, unsigned id, GLenum severity,
-              GLsizei length, const GLchar *message, const void *vm) {
+static void l_trigger_key_intr(vm_crt *crt, int key, int action, int mods) {
+    keyboard_intr_data* data = (keyboard_intr_data*) calloc(1, sizeof(keyboard_intr_data));
 
-  vm_crt* crt = *((vm_crt**) vm);
-  
-  if (crt->vm->log_fn)
-    crt->vm->log_fn(VM_LOG_INFO, "OpenGL debug message: %s", message);
+    data->scancode = (uint16_t) key;
+    data->action = (uint8_t) action;
+    data->mods = (uint8_t) mods;
+
+    vm_state_trigger_interrupt(crt->vm, (vm_interrupt) {.data = data, .type=VM_INTR_KEY, .setup_state=_setup_key_interrupt });
 }
 
-static void gl_error(int error, const char* descr) {
-  // No custom parameter alowed here, sadly
-  fprintf(stdout, ESC_RED "GLFW Error: " ESC_RST "%s\n", descr);
+const char *fs = 
+    "#version 330\n"
+    "in vec2 fragTexCoord;\n"
+    "in vec4 fragColor;\n"
+    "uniform sampler2D texture0;\n"
+    "uniform vec4 colDiffuse;\n"
+    "out vec4 finalColor;\n"
+    "const float renderWidth = 800;\n"
+    "const float renderHeight = 800;\n"
+    "float weight[3] = float[](0.25, 0.5, 0.25);\n"
+    "void main()\n"
+    "{\n"
+    "   vec3 texelColor = vec3(0.0);\n"
+    "   for (int i = -1; i <= 1; i++) {\n"
+    "       texelColor += texture(texture0, fragTexCoord + vec2(float(i)/renderWidth, 0.0)).rgb*weight[i + 1];\n"
+    "   }\n"
+    "   finalColor = vec4(texelColor, 1.0);\n"
+    "}\n";
+
+// due to raylib having global state, who cares
+static RenderTexture rt;
+static Shader postproc;
+
+vm_crt* vm_crt_new(vm_state* vm) {
+
+    check$(vm, "You should provide a VM for which window is opened");
+
+    // Setup the data structure
+
+    vm_crt* crt = (vm_crt*) calloc(sizeof(vm_crt), 1);
+    check$(crt, "CRT data structure must be allocated");
+    crt->vm = vm;
+
+    crt->seg_pool = ia_new_empty_array$(size_t);
+    crt->segs = ia_new_empty_array$(_vm_crt_segment);
+    crt->oldest_idx = -1;
+    crt->newest_idx = -1;
+    crt->cursor = (_vm_crt_point) { 0.5f, 0.5f };
+    crt->should_exit = crt->was_closed = false;
+    crt->prev_update_time = 0;
+    vm->crt = crt;
+    crt->keys = ia_new_empty_array$(int);
+
+    // Open window
+
+    InitWindow(800, 800, "IVM");
+    rt = LoadRenderTexture(800, 800);
+    postproc = LoadShaderFromMemory(NULL, fs);
+    return crt;
 }
 
+void vm_crt_loop(vm_crt *crt) {
+    //----[ Main loop ]
 
-static void* _render_thread(void* _crt) {
+    if (!crt || crt->was_closed)
+        return;
 
-  vm_crt* crt = (vm_crt*) _crt;
+    double now = vm_time_ns() / 1.0e9;
+    if (crt->prev_update_time + TIME_BETWEEN_TICKS > now)
+        return;
+    crt->prev_update_time = now;
 
-  // Do the fun stuff here
-  
-  //----[ Open a window ]
-  
-  if (!glfwInit())
-    die$("Failed to init GLFW");
+    PollInputEvents();
 
-  glfwSetErrorCallback(gl_error);
+    if(crt->should_exit || WindowShouldClose()) {
+        if (crt->vm->log_fn)
+            crt->vm->log_fn(VM_LOG_INFO, "Rendering thread: Window was closed, performing teardown");
+        crt->was_closed = true;
+        crt->vm->should_die = true;
+        CloseWindow();
+        return;
+    }
 
-  GLFWwindow* win = glfwCreateWindow(800, 800, "IVM", NULL, NULL);
-  check$(win, "Failed to open a GLFW window");
-  crt->window = win;
-  glfwSetWindowUserPointer(win, (void*) crt);
+    int mods = l_collect_mods();
 
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
-  glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
-
-  glfwMakeContextCurrent(win);
-  glfwSetKeyCallback(win, glfw_key_callback);
-
-  check$(glewInit() == GLEW_OK, "GLEW should initialize");
-
-  glEnable(GL_DEBUG_OUTPUT);
-  glDebugMessageCallback(&gl_debug, &crt);
-
-  glfwShowWindow(win);
-
-  if (crt->vm->log_fn)
-    crt->vm->log_fn(VM_LOG_INFO, "CRT Window should be open now");
- 
-  glfwWindowHint(GLFW_SAMPLES, 4);
-  glEnable(GL_MULTISAMPLE);
-
-  //----[ Setup stuff ]
-
-  glClearColor(BG_COLOR, 1.0);
-
-  crt->shader_program = make_program_or_die(shader[0], shader[1]);
-  crt->circle_uniform = glGetUniformLocation(crt->shader_program, "is_circle");
-
-  glGenVertexArrays(1, &crt->vertex_array);
-  glBindVertexArray(crt->vertex_array);
-
-  glGenBuffers(1, &crt->array_buffer);
-  glGenBuffers(1, &crt->elem_buffer);
-
-  const unsigned indices[6] = {
-    0, 3, 2,
-    0, 1, 3
-  };
-
-  glBindBuffer(GL_ARRAY_BUFFER, crt->array_buffer);
-  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, crt->elem_buffer);
-
-  glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), &indices, GL_STATIC_DRAW);
-
-  // Why it had to be void*? Why?
-  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*) 0);
-  glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*) (sizeof(float) * 3));
-  glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*) (sizeof(float) * 4));
-
-  glEnableVertexAttribArray(0);
-  glEnableVertexAttribArray(1);
-  glEnableVertexAttribArray(2);
-
-  //----[ Main loop ]
-  
-  glfwPollEvents();
-
-  while (!crt->should_exit && !glfwWindowShouldClose(crt->window)) {
+    int key;
+    while ((key = GetKeyPressed())) {
+        l_trigger_key_intr(crt, key, 1, mods);
+        ia_push$(&crt->keys, key);
+    }
     
-    int w, h;
-    glfwGetWindowSize(crt->window, &w, &h);
-    glViewport(0, 0, w, h);
-    crt->screen_size.x = w;
-    crt->screen_size.y = h;
-    double now = glfwGetTime();
+    size_t kpos = 0;
+    for (size_t i = 0; i < ia_length(crt->keys); ++i) {
+        if (!IsKeyDown(crt->keys[i])) {
+            l_trigger_key_intr(crt, crt->keys[i], 0, mods);
+        } else {
+            crt->keys[kpos++] = crt->keys[i];
+        }
+    }
+    ia_resize$(&crt->keys, kpos);
 
-    glClear(GL_COLOR_BUFFER_BIT);
-
+    BeginTextureMode(rt);
 
     size_t seg = crt->oldest_idx;
-    bool prev_stroke = false;
-    float prev_end = 0;
 
-    while (seg != -1) {
-      _vm_crt_point end = crt->segs[seg].next_idx == (size_t) -1
-                        ? crt->cursor
-                        : crt->segs[crt->segs[seg].next_idx].start;
+    int w = GetScreenWidth(), h = GetScreenHeight();
+    while (seg != (size_t) -1) {
+        _vm_crt_point end = crt->segs[seg].next_idx == (size_t) -1
+            ? crt->cursor
+            : crt->segs[crt->segs[seg].next_idx].start;
+        _vm_crt_point start = crt->segs[seg].start;
 
-      float start_time = 1.0 - (now - crt->segs[seg].line_start_time) / FULL_FADE_TIME;
-      float end_time = 1.0 - (now - crt->segs[seg].line_end_time) / FULL_FADE_TIME;
+        float start_time = 1.0 - (now - crt->segs[seg].line_start_time) / FULL_FADE_TIME;
+        float end_time = 1.0 - (now - crt->segs[seg].line_end_time) / FULL_FADE_TIME;
 
-      if (crt->segs[seg].line_start_time > 0) {
-        // If it is > 0, draw a line
-        //_draw_circle(crt, crt->segs[seg].start, LINE_WIDTH/2, start_time);
-        _draw_line(crt, crt->segs[seg].start, end, LINE_WIDTH, start_time, end_time);
-        prev_stroke = true;
-        prev_end = end_time;
-      } else {
-        // Else there is no line
-        if (prev_stroke) { // Draw endcap on previous line
-          //_draw_circle(crt, crt->segs[seg].start, LINE_WIDTH/2, prev_end);
+        if (crt->segs[seg].line_start_time > 0) {
+            // If it is > 0, draw a line
+            DrawLine(start.x * w, start.y * h, end.x * w, end.y * h, ColorLerp(BLACK, GetColor(0xe38e4dff), end_time));
         }
-        prev_stroke = false;
-      }
-
-      seg = crt->segs[seg].next_idx;
+        seg = crt->segs[seg].next_idx;
     }
-    
-    //_draw_circle(crt, crt->cursor, LINE_WIDTH/2, 1.0);
 
-    glfwSwapBuffers(crt->window);
+    EndTextureMode();
+
+    BeginDrawing();
+    ClearBackground(GetColor(0x333333ff));
+    BeginShaderMode(postproc);
+    DrawTextureRec(rt.texture, (Rectangle) { 0, 0, rt.texture.width, -rt.texture.height }, (Vector2) {0, 0}, WHITE);
+    EndShaderMode();
+    EndDrawing();
+
 
     // Clear out old segments
-    pthread_mutex_lock(&crt->mutex);
     while (crt->oldest_idx != (size_t) -1 &&
-           crt->segs[crt->oldest_idx].line_end_time < now - FULL_FADE_TIME) {
-      // That segment is no longer needed
-      ia_push$(&crt->seg_pool, crt->oldest_idx);
-      crt->oldest_idx = crt->segs[crt->oldest_idx].next_idx;
+            crt->segs[crt->oldest_idx].line_end_time < now - FULL_FADE_TIME) {
+        // That segment is no longer needed
+        ia_push$(&crt->seg_pool, crt->oldest_idx);
+        crt->oldest_idx = crt->segs[crt->oldest_idx].next_idx;
     }
     if (crt->oldest_idx == (size_t) -1)
-      crt->newest_idx = -1;
-
-    pthread_mutex_unlock(&crt->mutex);
-
-    glfwPollEvents();
-  }
-
-  if (crt->vm->log_fn)
-    crt->vm->log_fn(VM_LOG_INFO, "Rendering thread: Window was closed, performing teardown");
-
-  //----[ Teardown ]
-  
-  crt->was_closed = true;
-
-  return NULL;
+        crt->newest_idx = -1;
 }
+
+void vm_crt_destroy(vm_crt* crt) {
+    if (!crt) return;  
+    crt->should_exit = true;
+    vm_crt_loop(crt);
+}
+

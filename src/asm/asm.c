@@ -6,11 +6,16 @@
 #include "ivm/asm/symtab.h"
 #include "ivm/common/array.h"
 #include "ivm/common/macros.h"
+#include "ivm/common/util.h"
 
+#include <assert.h>
+#include <linux/limits.h>
 #include <stdint.h>
 #include <ctype.h>
 #include <endian.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sysexits.h>
 
 // TODO: sections
@@ -178,16 +183,58 @@ void iasm_emit_number(FILE* output, ivm_sym_value_t val, size_t num_bytes, bool 
   #undef VARIANT
 }
 
+///
+/// Parse given source file into given array.
+/// This will resolve all includes withn the file.
+///
+void parse_source(const char *source, ia_arr$(ast_node) *into, ia_arr$(ivm_file*) *files) {
+    // NOTE: we are not freeing buffers, but they will be needed
+    // for rest of the program. Doing this properly would require
+    // some array to keep them where
+    char* buf;
+    if (!read_file(source, NULL, &buf))
+        die$("Failed to read %s", source);
+
+    ivm_file* f = ivm_file_new(source, buf);
+    check$(f, "File must be created");
+    ia_push$(files, f);
+
+    // get dirname
+    // FIXME: this can be overflown, because PATH_MAX does not mean a shit
+    char pathbuf[PATH_MAX];
+    sprintf(pathbuf, "%s", source);
+    size_t sep_pos = -1;
+    for (size_t i = 0; pathbuf[i] != '\0'; ++i)
+        if (pathbuf[i] == '/')
+            sep_pos = i;
+    assert(sep_pos != (size_t) -1);
+
+    ia_arr$(ast_node) ast = iasm_parse_file(f);
+    for (size_t i = 0; i < ia_length(ast); ++i) {
+        if (ast[i].type == AST_DIR_BLOB && ivm_span_equals_to_str(ast[i].as_dir_blob.dir_name, ".include")) {
+            ivm_span pathstr = ast[i].as_dir_blob.value;
+            pathbuf[sep_pos+1] = '\0';
+            // remember to remove quotes
+            strncat(pathbuf, pathstr.file->contents + pathstr.begin + 1, pathstr.end - pathstr.begin - 2);
+            parse_source(pathbuf, into, files);
+        } else {
+            ia_push$(into, ast[i]);
+        }
+    }
+    ia_destroy_array(ast);
+}
 
 void iasm_assemble(FILE* output,
-                  ia_arr$(ast_node) ast,
+                  const char *source,
                   iasm_fn_to_get_instr_length get_len,
                   iasm_fn_to_emit_instr get_bytecode) {
 
+  ia_arr$(ast_node) ast = ia_new_empty_array$(ast_node);
+  ia_arr$(ivm_file*) files = ia_new_empty_array$(ivm_file*);
+  parse_source(source, &ast, &files);
+
   // First pass : labels, constants, and offset computation
 
-  // List of variable-sized elements
-  ia_arr$(ivm_symtab_entry*) variable_elements = ia_new_empty_array$(ivm_symtab_entry*);
   ivm_symtab symtab = ivm_symtab_new();
 
   // Will be non-const later with support for the sections.
@@ -216,6 +263,7 @@ void iasm_assemble(FILE* output,
       }
 
       case AST_INSTR: {
+        ast[i].as_instr.pc = location;
         location += get_len(ast[i].as_instr.name, ast[i].as_instr.args);
         break;
       }
@@ -226,8 +274,8 @@ void iasm_assemble(FILE* output,
       }
 
       case AST_DIR_BLOB: {
-        if (ivm_span_equals_to_str(ast[i].as_dir_blob.dir_name, ".base64")) {
-          ivm_report(REPORT_ERROR, ast[i].as_dir_blob.dir_name, "Sorry, but I will add support for this later");
+        if (ivm_span_equals_to_str(ast[i].as_dir_blob.dir_name, ".include")) {
+          ivm_report(REPORT_ERROR, ast[i].as_dir_blob.dir_name, "How this slipped to assembler?");
           exit(EX_DATAERR);
         }
         location += string_token_length(ast[i].as_dir_blob.value);
@@ -236,6 +284,23 @@ void iasm_assemble(FILE* output,
 
       case AST_DIR_NUMBER: {
         location += num_dir_sz(ast[i].as_dir_number.dir_name);
+        break;
+      }
+
+      case AST_DIR_SYMTYPE: {
+        // TODO: generate symtab
+        ivm_span fname;
+        for (size_t j = i+1; j < ia_length(ast); ++j) {
+            if (ast[j].type == AST_LABEL) {
+                fname = ast[j].as_label.name;
+                 break;
+            }
+        }
+        printf(ESC_RED ESC_BOLD);
+        ivm_span_fprint(stdout, ast[i].as_dir_symtype.dir_name);
+        printf(ESC_RST " ");
+        ivm_span_fprint(stdout, fname);
+        printf(ESC_YELLOW " @ %05zx\n" ESC_RST, location);
         break;
       }
 
@@ -253,10 +318,11 @@ void iasm_assemble(FILE* output,
     switch(ast[i].type) {
       case AST_LABEL:
       case AST_DIR_CONST:
+      case AST_DIR_SYMTYPE:
         continue;
 
       case AST_INSTR:
-        get_bytecode(ast[i].as_instr.name, ast[i].as_instr.args, &symtab, output);
+        get_bytecode(ast[i].as_instr.name, ast[i].as_instr.args, &symtab, output, ast[i].as_instr.pc);
         break;
 
       case AST_DIR_BLOB: {
@@ -282,6 +348,10 @@ void iasm_assemble(FILE* output,
       }
     }
   }
+  ia_destroy_array(ast);
+  for (size_t i = 0; i < ia_length(files); ++i)
+    ivm_file_destroy(files[i]);
+  ia_destroy_array(files);
 }
 
 

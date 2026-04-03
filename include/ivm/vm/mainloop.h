@@ -7,6 +7,9 @@
 
 #include "ivm/vm/state.h"
 
-void vm_mainloop(vm_state* state);
+/// Execute stuff
+void vm_exec(vm_state* state);
+
+uint64_t vm_time_ns(void);
 
 #endif

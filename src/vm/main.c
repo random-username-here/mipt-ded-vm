@@ -3,6 +3,7 @@
 #include "ivm/vm/crt.h"
 #include "ivm/vm/mainloop.h"
 #include "ivm/vm/state.h"
+#include <bits/time.h>
 #include <errno.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -10,8 +11,11 @@
 #include <stdarg.h>
 #include <string.h>
 #include <sysexits.h>
+#include <time.h>
 #include <unistd.h>
-#include <math.h>
+
+#define OPS_PER_UPDATE 1000
+#define TIMER1_TIME_NS (1000 * 1000 * 1000 / 30.0) // 10 ms
 
 const char* prefixes[] = {
   [VM_LOG_ERROR] = ESC_RED "Error: " ESC_RST,
@@ -40,70 +44,65 @@ void printer_putc(char c) {
   putc(c, stdout);
 }
 
-void* interruptor(void* _vm) {
-  vm_state* vm = (vm_state*) _vm;
-  vm->log_fn(VM_LOG_INFO, "Interruptor thread started");
+static void l_timer1_reset(vm_state *vm, void *arg) {
+    *((bool*) arg) = false;
+}
 
-  while (!vm->should_die) {
-    usleep(1000000 / 60);
-    //vm->log_fn(VM_LOG_INFO, "Triggering timer interrupt...");
-    vm_state_trigger_interrupt(_vm, (vm_interrupt) {
-        .type=VM_INTR_TIMER1,
-        .setup_state=NULL,
-        .data=NULL
+void vm_timer1_loop(vm_state *vm) {
+    static uint64_t prev_t = 0;
+    static bool is_waiting = false;
+    if (is_waiting) return;
+    uint64_t cur_t = vm_time_ns();
+    if (prev_t + TIMER1_TIME_NS > cur_t) return;
+    prev_t = cur_t;
+    vm_state_trigger_interrupt(vm, (vm_interrupt) {
+        .type = VM_INTR_TIMER1,
+        .setup_state = l_timer1_reset,
+        .data = &is_waiting
     });
-  }
-
-  return NULL;
+    is_waiting = true;
 }
 
 int main (int argc, const char** argv) {
-  
-  if (argc != 2) {
-    fprintf(stderr, "Go read the --help");
-    return EX_OK;
-  }
 
-  if (!strcmp(argv[1], "--help")) {
-    fprintf(stderr, "\n");
-    fprintf(stderr, "ivm - A toy stack virtual machine\n");
-    fprintf(stderr, "\n");
-    fprintf(stderr, "Usage: ivm <rom file>\n");
-    fprintf(stderr, "\n");
-    return EX_OK;
-  }
+    if (argc != 2) {
+        fprintf(stderr, "Go read the --help");
+        return EX_OK;
+    }
 
-  size_t rom_size;
-  char* rom;
-  if(!read_binary_file(argv[1], &rom_size, &rom))
-    die$("Failed to read file `%s` with ROM: %s", argv[1], strerror(errno));
+    if (!strcmp(argv[1], "--help")) {
+        fprintf(stderr, "\n");
+        fprintf(stderr, "ivm - A toy stack virtual machine\n");
+        fprintf(stderr, "\n");
+        fprintf(stderr, "Usage: ivm <rom file>\n");
+        fprintf(stderr, "\n");
+        return EX_OK;
+    }
 
-  vm_state* vm = vm_state_new();
-  
-  vm->printer_putc = printer_putc;
-  vm->log_fn = log_fn;
-  vm_state_mount_rom(vm, (uint8_t*) rom, rom_size);
-  vm->pc = RAM_END;
+    size_t rom_size;
+    char* rom;
+    if(!read_binary_file(argv[1], &rom_size, &rom))
+        die$("Failed to read file `%s` with ROM: %s", argv[1], strerror(errno));
 
-  vm_crt* crt = vm_crt_new(vm);
+    vm_state* vm = vm_state_new();
 
-  pthread_t timer_thread;
-  pthread_create(&timer_thread, NULL, interruptor, vm); 
-  vm_mainloop(vm);
-  pthread_join(timer_thread, NULL);
+    vm->printer_putc = printer_putc;
+    vm->log_fn = log_fn;
+    vm_state_mount_rom(vm, (uint8_t*) rom, rom_size);
+    vm->pc = RAM_END;
 
-  // Too nice to remove
-  /*float t = 0;
+    vm_crt *crt = vm_crt_new(vm);
 
-  while (!crt->was_closed) {
-    vm_crt_lineto(crt, sin(37 * t + M_PI*3/4) * 0.4 + 0.5, sin(29 * t) * 0.4 + 0.5);
-    t += 0.001;
-    usleep(1000 * 1000 / 60 / 10);
-  }*/
+    while (!vm->should_die) {  
+        for (size_t i = 0; i < OPS_PER_UPDATE; ++i)
+            vm_exec(vm);
+        vm_crt_loop(crt);
+        vm_timer1_loop(vm);
+    }
 
-  vm_crt_destroy(crt);
+    vm_crt_destroy(crt);
 
-  log_fn(VM_LOG_INFO, "VM main loop exited");
+    log_fn(VM_LOG_INFO, "VM main loop exited");
 
-  return 0;
+    return 0;
 }
