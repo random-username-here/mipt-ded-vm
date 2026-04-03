@@ -66,7 +66,7 @@ Except for feature demos, there are currently two programs with > 100 loc for it
 
 ### Pong (`examples/v1/pong.s`) ~ 960 loc
 
-![Pong](./assets/pong.png)
+<img src="./assets/pong.png" width="50%">
 
 This is the original demo program, demonstrated when presenting the project.
 
@@ -80,7 +80,7 @@ If you end up running it, keys `[q]`/`[a]` are used for left paddle and `[o]`/`[
 
 ### Bad apple (`examples/v2/apple/player.s`) ~ 150 loc
 
-![Bad apple](./assets/apple.png)
+<img src="./assets/apple.png" width="50%">
 
 This program was designed as a font renderer -- font glyphs are stored
 as sequences of operations: `move X Y`, `line X Y`, and `end`.

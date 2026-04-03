@@ -44,6 +44,15 @@ end_string:
 .const STRING_LEN end_string - my_string
 ```
 
+## `.include <filename>` - Include given file
+
+Just includes it as if it was written there. Paths are relative to current file.
+
+## `.func`, `.table`, `.string` - Symbol types
+
+Intended to be used if I make a linker for this. Currently prints
+symbol name and it's address in stdout while assembling.
+
 ## `.[iu](8|16|32|64) <expression>` - Embed a number into program
 
 This is fairly simple.
