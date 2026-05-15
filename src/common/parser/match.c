@@ -141,7 +141,7 @@ static void _compile_regexes(void) {
 
   // Just a normal C identifier
   ivm_compile_regex_or_die(&identifier_regex,
-                           "^[A-Za-z_][A-Za-z0-9_]*",
+                           "^[A-Za-z_][A-Za-z0-9_.$#@]*",
                            REG_EXTENDED);
 
   // Number regex, allowing prefixes

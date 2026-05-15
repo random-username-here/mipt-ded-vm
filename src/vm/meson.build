@@ -4,5 +4,7 @@ vm_files = files(
   'mem.c',
   'ops.c',
   'state.c',
-  'crt.c'
+  'dev/crt.c',
+  'dev/printer.c',
+  'dev/modem.c'
 ) + common_sources

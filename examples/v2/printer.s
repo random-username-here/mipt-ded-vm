@@ -1,6 +1,7 @@
 ///=========================================================
 /// printer.s -- Reuseable printing library for IVM
 ///=========================================================
+/// Requires second stack to be set up!
 
 ///
 /// Print a single character
@@ -55,7 +56,7 @@ print_number:
 
     // if negative -> print `-` ane negate
     dup
-    lt 0
+    le 0
     jnz _print_number_positive
     rcall 0x2d, print_char // `-`
     push 0

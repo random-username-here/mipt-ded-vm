@@ -14,8 +14,13 @@
 
 #ifndef IVM_VM_MEM
 #define IVM_VM_MEM
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
-#include "ivm/vm/state.h"
+typedef struct vm_state vm_state;
+typedef struct vm_dev vm_dev;
+typedef int64_t vm_stack_val_t;
 
 typedef enum {
   VM_MEM_READ = 1,
@@ -50,5 +55,12 @@ bool vm_mem_read(
 ///            only `size` lowest bytes will be written.
 ///
 bool vm_mem_write(vm_state* state, vm_stack_val_t addr, size_t size, vm_stack_val_t val);
+
+/// Splitting number into bits
+uint8_t* index_num(vm_stack_val_t* val, size_t index);
+uint8_t index_num_const(vm_stack_val_t val, size_t index);
+
+/// Trigger segfault, return false
+bool vm_mem_segfault(vm_state *state, vm_stack_val_t addr);
 
 #endif

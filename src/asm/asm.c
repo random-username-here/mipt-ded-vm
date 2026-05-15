@@ -207,7 +207,6 @@ void parse_source(const char *source, ia_arr$(ast_node) *into, ia_arr$(ivm_file*
     for (size_t i = 0; pathbuf[i] != '\0'; ++i)
         if (pathbuf[i] == '/')
             sep_pos = i;
-    assert(sep_pos != (size_t) -1);
 
     ia_arr$(ast_node) ast = iasm_parse_file(f);
     for (size_t i = 0; i < ia_length(ast); ++i) {

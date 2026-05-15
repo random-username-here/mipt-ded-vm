@@ -21,27 +21,31 @@
     06 r SNE a b    15 r GE a b     25 b a SWAP a b     35 CLI
     07 r LSH x n                                        36 FINI
     08 r RSH x n        = Second stack (v2)             37 RJMP  \
-                        50 sf GSF                       38 RJNZ  | v2
-    = Memory            51 SSF sf     60 SADD n         39 RCALL |
-    40 r GET8 addr      52 sp GSP                       3a GPC   /
-    41 r GET16 addr     53 SSP sp
-    42 r GET32 addr     54 SPUSH val                    
-    43 r GET64 addr     55 val SPOP
-    44 PUT8 r addr      56 SFBEGIN
-    45 PUT16 r addr     57 SFEND
-    46 PUT32 r addr     58..5b n SFLOADnn off
-    47 PUT64 r addr     5c..5f SFSTOREnn n off
+    09 r OR  a b        50 sf GSF                       38 RJNZ  | v2
+    0a r AND a b        51 SSF sf                       39 RCALL |
+    0b r XOR a b        52 sp GSP                       3a GPC   /
+                        53 SSP sp                       
+    = Memory            54 SPUSH val              
+    40 r GET8 addr      55 val SPOP                       
+    41 r GET16 addr     56 SFBEGIN
+    42 r GET32 addr     57 SFEND                    
+    43 r GET64 addr     58..5b n SFLOADnn off
+    44 PUT8 r addr      5c..5f SFSTOREnn n off
+    45 PUT16 r addr     60 SADD n
+    46 PUT32 r addr     
+    47 PUT64 r addr     
 
 ====== Interrupts ==============================================================
 
     There are total of 31 interrupts. They are numbered 1 to 31. Each can be
     triggered manually. Interrupts above 16 will never be autotriggered.
 
-    Currently there are 3 interrupts which are triggered externally:
+    Currently there are 4 interrupts which are triggered externally:
 
-    01  INTR_TIMER1     Timer
-    08  INTR_KEY        Key pressed on keyboard
-    0F  INTR_EXCEPTION  Processor encountered a problem (division by zero, etc)
+    00  INTR_TIMER1     Timer
+    07  INTR_KEY        Key pressed on keyboard
+    08  INTR_MODEM      Modem has new data/connection was closed
+    0E  INTR_EXCEPTION  Processor encountered a problem (division by zero, etc)
 
     Interrupt handlers are set by putting handler address into interrupt table.
 
@@ -66,9 +70,15 @@
     00130 -- 00150  ... CRT
     00130           i16     Target ray x (0 to 2^16-1, left to right)
     00132           i16     Target ray y (0 to 2^16-1, top to bottom)
-    00134           i8      Command (0 = move, 1 = draw line)
-    00135           i8      1 if CRT is present (v2 only)
+    00134           i8      Command (0 = move, 1 = draw line, write-only)
     00150 -- 00160  ... Keyboard
     00150           i16     GLFW key code
     00152           i8      Key state (0 release, 1 press, 2 repeat)
     00153           i8      GLFW modifier bits
+    00160 -- 00180  ... Modem
+    00160           i64     Argument A (ip/buffer)
+    00168           i64     Argument B (port/length)
+    00170           i8      Modem status
+    00171           i8      Modem command (write-only)
+    00172           i8      Modem error code
+

@@ -1,13 +1,16 @@
 #include <math.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <raylib.h>
-#include "ivm/vm/crt.h"
+#include "ivm/vm/dev/crt.h"
 #include "ivm/common/array.h"
 #include "ivm/common/macros.h"
+#include "ivm/vm/dev.h"
 #include "ivm/vm/mainloop.h"
+#include "ivm/vm/mem.h"
 #include "ivm/vm/state.h"
 
 #define TIME_BETWEEN_TICKS (1.0 / 30)
@@ -94,15 +97,16 @@ void vm_crt_lineto(vm_crt* crt, float x, float y) {
 #define STR(v) STR2(v)
 
 typedef struct {
+  vm_crt *crt;
   uint16_t scancode;
   uint8_t action, mods;
 } keyboard_intr_data;
 
 static void _setup_key_interrupt(vm_state* vm, void* _data) {
   keyboard_intr_data* data = (keyboard_intr_data*) _data;
-  vm->kb_scancode = data->scancode;
-  vm->kb_mods = data->mods;
-  vm->kb_action = data->action;
+  data->crt->kb_scancode = data->scancode;
+  data->crt->kb_mods = data->mods;
+  data->crt->kb_action = data->action;
   free(data);
 }
 
@@ -119,6 +123,7 @@ static int l_collect_mods(void) {
 static void l_trigger_key_intr(vm_crt *crt, int key, int action, int mods) {
     keyboard_intr_data* data = (keyboard_intr_data*) calloc(1, sizeof(keyboard_intr_data));
 
+    data->crt = crt;
     data->scancode = (uint16_t) key;
     data->action = (uint8_t) action;
     data->mods = (uint8_t) mods;
@@ -149,32 +154,97 @@ const char *fs =
 static RenderTexture rt;
 static Shader postproc;
 
-vm_crt* vm_crt_new(vm_state* vm) {
+static bool _write_crt(
+        vm_state* state, vm_dev *dev,
+        vm_stack_val_t off,
+        uint8_t val
+        ) {
+    vm_crt *crt = (vm_crt*) dev;
+    switch (off) {
+    case 0: case 1:
+        *index_num(&crt->crt_x, off) = val;
+        break;
+    case 2: case 3:
+        *index_num(&crt->crt_y, off - 2) = val;
+        break;
+    case 4:
+        if (val == 0)
+            vm_crt_goto(crt, crt->crt_x / 65535.0, crt->crt_y / 65535.0);
+        else
+            vm_crt_lineto(crt, crt->crt_x / 65535.0, crt->crt_y / 65535.0);
+        break;
+    default:
+        return vm_mem_segfault(state, dev->base + off);
+    }
+    return true;
+}
+
+static bool _read_keyboard(
+    vm_state *state, vm_dev *dev,
+    vm_stack_val_t off, vm_mem_usage usage,
+    uint8_t* out
+) {
+    vm_crt *crt = (vm_crt*)((char*) dev - offsetof(vm_crt, kbd));
+
+    if (usage != VM_MEM_READ)
+        return vm_mem_segfault(state, off + dev->base);
+    switch (off) {
+        case 0: case 1:
+            *out = index_num_const(crt->kb_scancode, off);
+            break;
+        case 2:
+            *out = crt->kb_action;
+            break;
+        case 3:
+            *out = crt->kb_mods;
+            break;
+        default:
+            return vm_mem_segfault(state, off + dev->base);
+
+    }
+    return true;
+}
+
+
+void vm_crt_init(vm_crt *crt, vm_state* vm) {
 
     check$(vm, "You should provide a VM for which window is opened");
+    check$(crt, "CRT data structure must be allocated");
 
     // Setup the data structure
 
-    vm_crt* crt = (vm_crt*) calloc(sizeof(vm_crt), 1);
-    check$(crt, "CRT data structure must be allocated");
-    crt->vm = vm;
-
-    crt->seg_pool = ia_new_empty_array$(size_t);
-    crt->segs = ia_new_empty_array$(_vm_crt_segment);
-    crt->oldest_idx = -1;
-    crt->newest_idx = -1;
-    crt->cursor = (_vm_crt_point) { 0.5f, 0.5f };
-    crt->should_exit = crt->was_closed = false;
-    crt->prev_update_time = 0;
-    vm->crt = crt;
-    crt->keys = ia_new_empty_array$(int);
+    *crt = (vm_crt) {
+        .dev = (vm_dev) {
+            .type = VM_DEV_CRT,
+            .name = "Raylib XY CRT emulation",
+            .writer = _write_crt,
+            .reader = NULL,
+            .size = 32,
+        },
+        .kbd = (vm_dev) {
+            .type = VM_DEV_KEYBOARD,
+            .name = "Raylib keyboard emulation",
+            .writer = NULL,
+            .reader = _read_keyboard,
+            .size = 16
+        },
+        .vm = vm,
+        .seg_pool = ia_new_empty_array$(size_t),
+        .segs = ia_new_empty_array$(_vm_crt_segment),
+        .oldest_idx = -1,
+        .newest_idx = -1,
+        .cursor = (_vm_crt_point) { 0.5f, 0.5f },
+        .should_exit = false,
+        .was_closed = false,
+        .prev_update_time = 0,
+        .keys = ia_new_empty_array$(int)
+    };
 
     // Open window
 
     InitWindow(800, 800, "IVM");
     rt = LoadRenderTexture(800, 800);
     postproc = LoadShaderFromMemory(NULL, fs);
-    return crt;
 }
 
 void vm_crt_loop(vm_crt *crt) {

@@ -6,6 +6,7 @@
 #define IVM_VM_CRT
 
 #include "ivm/common/array.h"
+#include "ivm/vm/dev.h"
 #include "ivm/vm/state.h"
 //#include <GLFW/glfw3.h>
 #include <pthread.h>
@@ -28,6 +29,11 @@ typedef struct {
 } _vm_crt_segment;
 
 typedef struct vm_crt {
+  vm_dev dev;
+  vm_dev kbd;
+
+  vm_stack_val_t crt_x, crt_y;
+
   vm_state* vm;
 
   // This is a CRT, so we are drawing lines,
@@ -44,21 +50,23 @@ typedef struct vm_crt {
   bool should_exit;
   bool was_closed;
   double prev_update_time;
+
+  uint16_t kb_scancode;
+  uint8_t kb_action;
+  uint8_t kb_mods;
+
 } vm_crt;
 
 /// \brief Create a new CRT window
 ///
 /// Opens the window, returns the object
 ///
-vm_crt* vm_crt_new(vm_state* vm);
+void vm_crt_init(vm_crt *crt, vm_state *vm);
 
 /// \brief Perform CRT event handling
 void vm_crt_loop(vm_crt *crt);
 
 /// \brief Destroy the CRT window
-///
-/// This joins the rendering process and closes the window
-/// (and frees the data, obviously)
 ///
 void vm_crt_destroy(vm_crt* crt);
 

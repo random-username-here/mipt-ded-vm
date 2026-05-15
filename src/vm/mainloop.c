@@ -3,10 +3,10 @@
 #include "ivm/vm/mem.h"
 #include "ivm/vm/ops.h"
 #include "ivm/vm/state.h"
-#include "ivm/vm/crt.h"
 #include <bits/time.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <time.h>
 
 typedef bool (*op_fn)(vm_state* state);
 
@@ -101,7 +101,8 @@ void vm_exec(vm_state* state) {
     vm_mem_read(state, state->pc, 1, VM_MEM_EXEC, &opcode);
     check$(0 <= opcode && opcode <= 0xff, "One byte containing the opcode must be read");
 
-    //printf("Executing opcode 0x%02llx @ %05llx\n", opcode, state->pc);
+    if (state->verbose_log)
+        state->log_fn(VM_LOG_VERB, "Executing opcode $%02llx @ $%05llx", opcode, state->pc);
 
     if (opcode == PUSH_OPCODE) {
         vm_stack_val_t value;
@@ -135,21 +136,22 @@ void vm_exec(vm_state* state) {
                 }
                 state->should_die = true;
                 break;
-            } else if (!handler) {
-                // No interrupt handler for any other interrupt
-                // Ignore this interrupt
-                continue;
             }
-            ia_push$(&state->interrupt_type, state->asked_interrupts[i].type);
-            ia_push$(&state->interrupt_return_addr, state->pc);
+
+            if (handler) {
+                ia_push$(&state->interrupt_type, state->asked_interrupts[i].type);
+                ia_push$(&state->interrupt_return_addr, state->pc);
+            }
 
             if (state->asked_interrupts[i].setup_state) {
+                // perform state changes, but maybe don't do anything
                 state->asked_interrupts[i].setup_state(
                     state, state->asked_interrupts[i].data
                 );
             }
 
-            state->pc = handler;
+            if (handler)
+                state->pc = handler;
         } else {
             if (num_postponed != i)
                 state->asked_interrupts[num_postponed] = state->asked_interrupts[i];

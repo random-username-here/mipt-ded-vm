@@ -9,7 +9,7 @@
 #define IVM_VM_STATE
 
 #include "ivm/common/array.h"
-#include <stdatomic.h>
+#include "ivm/vm/dev.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -24,14 +24,16 @@
 
 typedef enum {
 
-  VM_INTR_TIMER1 = 0x01,
+  VM_INTR_TIMER1 = 0x00,
 
   // Key callback
-  VM_INTR_KEY = 0x08,
+  VM_INTR_KEY = 0x07,
+  // Data available in modem
+  VM_INTR_MODEM = 0x08,
 
   /// Interrupt which happens when something bad happened
   /// (like stack underflow)
-  VM_INTR_EXCEPTION = 0x0f,
+  VM_INTR_EXCEPTION = 0x0e,
 
   VM_INTR_NONE = NUM_INTERRUPTS
 
@@ -110,15 +112,13 @@ typedef enum {
 /// Types of logs emitted by the VM
 /// using the `log_fn` of `vm_state`.
 typedef enum {
+  VM_LOG_VERB,
   VM_LOG_INFO,
   VM_LOG_WARNING,
   VM_LOG_ERROR
 } vm_log_type;
 
-
-typedef int64_t vm_stack_val_t;
-
-struct vm_crt;
+typedef void (*vm_log_fn)(vm_log_type type, const char* fmt, ...);
 
 typedef struct vm_state {
 
@@ -176,36 +176,26 @@ typedef struct vm_state {
   vm_stack_val_t exception_segfault_addr;
   vm_exception_type exception_type;
 
-  //---- Keyboard
-  uint16_t kb_scancode;
-  uint8_t kb_action;
-  uint8_t kb_mods;
-
   //---- Showing messages
 
-  /// Function to log a message
-  void (*log_fn)(vm_log_type type, const char* fmt, ...);
-
-  /// Print one character on the printer
-  void (*printer_putc)(char c);
-
-  //---- The CRT
-  
-  struct vm_crt* crt;
-
-  vm_stack_val_t crt_x, crt_y;
+  vm_log_fn log_fn;
+  bool verbose_log;
 
   //---- V2
 
   vm_stack_val_t v2_sp, v2_sf;
 
+  //---- V2 Devices
+  // Memory-mapped CPU things: interrupt table & exception data
+  vm_dev mmreg;
+  ia_arr$(vm_dev*) devices;
+
 } vm_state;
 
 /// \brief Initialize a new VM 
-vm_state* vm_state_new (void);
+void vm_state_init(vm_state *state, vm_log_fn logger);
 
 /// \brief Free a VM you no longer need
-/// Remember to kill all the threads which use the state before this!
 void vm_state_destroy(vm_state* state);
 
 /// \brief Trigger an interrupt
@@ -215,12 +205,6 @@ void vm_state_trigger_interrupt(vm_state* state, vm_interrupt intr);
 ///
 /// This function sets all things in state and waits untill
 /// an interrupt is trigerred. Then it returns.
-/// 
-/// \hack HACK!!!: This unlocks/locks state mutex twice,
-///                because the first time it is locked by the main loop.
-///                A better way is needed, but I couldn't find a way
-///                to read lock count of the recursive mutex.
-///                A base library with all the threading stuff is required.
 ///
 void vm_state_halt(vm_state* state);
 
@@ -231,6 +215,9 @@ void vm_state_halt(vm_state* state);
 /// execute it from there.
 ///
 void vm_state_mount_rom(vm_state* state, uint8_t* rom, size_t rom_size);
+
+/// \brief Mount device at specified address
+void vm_state_mount_dev(vm_state *state, vm_dev *dev, vm_stack_val_t base);
 
 /// \brief Raise an exception to be handled with corresponding interrupt
 void vm_state_raise_exception(vm_state* state, vm_exception_type type);

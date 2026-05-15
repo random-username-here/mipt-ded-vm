@@ -23,7 +23,8 @@ by X86.
     - 4K of io memory, 60K of RAM for the program, unlimited amout of ROM
     - Some memory-mapped IO:
         - A printer 
-        - A emulated vector CRT display
+        - A emulated vector CRT display + keyboard
+        - (v2) A modem (interface to one unix socket connection)
     - Interrupts: timer, exception and keyboard
     - ~60 instructions
     - (v2) Second stack in RAM. First stack is now treated as registers. `sp` register for second stack.
@@ -55,6 +56,8 @@ in there. Currently there are:
  - Exception data for interrupt handler: exception type (segfault, divide by zero, etc), exception pc, segfault address
  - Printer: a byte written to that address will be printed in emulator's terminal
  - CRT: we have a couple of registers, with which we can move CRT beam around.
+ - Modem: we have argument registers, status registers and control register,
+   to which commands are written.
 
 This ISA design is probbably fairly bad for real hardware (due to this 
 being a stack machine, which will probbably make pipelining harder), but
@@ -92,6 +95,16 @@ This is a testbed for new features of version 2. Stack frame relative adressing
 allowed more complex functions to be written, without that offset-from-top hell.
 
 Version 2 was designed for writting a compiler, so I did not write a big example.
+
+### Modem demo (`examples/v2/modem.s`) ~ 200 loc
+
+<img src="./assets/modem.svg" width="50%">
+
+This is a test of the modem. It connects to [http://example.com] and fetches
+that page using pre-recorded HTTP query.
+
+Modem is meant to be used by higher-level language, and not by assembly, but
+it's API is fairly simple, in style of open/recv/send/close.
 
 ## Compiling & running samples by yourself
 
